@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: "Sistem Penilaian Kinerja Guru",
   description: "Aplikasi penilaian kinerja guru oleh siswa",
 };
-
-export const dynamic = 'force-dynamic'
 
 export default function RootLayout({
   children,

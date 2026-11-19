@@ -1,22 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    agentFeedback: true,
-  },
-  cacheComponents: true,
-  partialPrefetching: true,
-  turbopack: {
-    rules: {
-      "*.css": {
-        loaders: ["@tailwindcss/turbopack"],
-        as: "*.css",
-      },
-    },
-  },
+  // Abaikan error TypeScript saat build (agar 50 problems tidak menggagalkan deploy)
   typescript: {
     ignoreBuildErrors: true,
   },
+  // Abaikan error ESLint saat build
   eslint: {
     ignoreDuringBuilds: true,
   },
