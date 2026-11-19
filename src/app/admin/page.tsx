@@ -168,17 +168,13 @@ export default function AdminDashboard() {
               <h2 className="text-lg font-bold text-gray-900">🏆 Ranking Guru Berdasarkan Skor Total</h2>
               <p className="text-sm text-gray-500 mt-1">Klik nama guru untuk melihat detail analisis</p>
             </div>
+
             <button
-              onClick={() => {
-                if (teachers.length === 0) {
-                  alert('Belum ada data untuk diexport')
-                  return
-                }
-                window.location.href = '/api/admin/export/all'
-              }}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-medium text-sm flex items-center gap-2"
+              onClick={() => alert('Fitur Export Excel akan segera hadir!')}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-medium text-sm flex items-center gap-2 opacity-50 cursor-not-allowed"
+              disabled
             >
-              📥 Export Semua ke Excel
+              📥 Export Semua ke Excel (Segera)
             </button>
           </div>
 
