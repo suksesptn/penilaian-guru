@@ -6,6 +6,8 @@ export const metadata: Metadata = {
   description: "Aplikasi penilaian kinerja guru oleh siswa",
 };
 
+export const dynamic = 'force-dynamic'
+
 export default function RootLayout({
   children,
 }: Readonly<{
