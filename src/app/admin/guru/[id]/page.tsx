@@ -164,19 +164,16 @@ export default function TeacherDetailPage() {
     wsDist['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 12 }]
     XLSX.utils.book_append_sheet(wb, wsDist, 'Distribusi Jawaban')
 
-    // Sheet 4: Saran Masukan
+    // Sheet 4: Saran Masukan (ANONIM - tanpa nama siswa)
     const feedbackData = feedbacks.map((fb, idx) => ({
       No: idx + 1,
-      'Nama Siswa': fb.student_name,
-      NIS: fb.nis,
-      Tanggal: new Date(fb.submitted_at).toLocaleString('id-ID'),
       'Saran/Masukan': fb.feedback
     }))
     if (feedbackData.length === 0) {
-      feedbackData.push({ No: 1, 'Nama Siswa': '', NIS: '', Tanggal: '', 'Saran/Masukan': 'Tidak ada saran/masukan dari siswa' })
+      feedbackData.push({ No: 1, 'Saran/Masukan': 'Tidak ada saran/masukan dari siswa' })
     }
     const wsFeedback = XLSX.utils.json_to_sheet(feedbackData)
-    wsFeedback['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 15 }, { wch: 25 }, { wch: 60 }]
+    wsFeedback['!cols'] = [{ wch: 5 }, { wch: 80 }]
     XLSX.utils.book_append_sheet(wb, wsFeedback, 'Saran Masukan')
 
     // Download
@@ -184,7 +181,7 @@ export default function TeacherDetailPage() {
     XLSX.writeFile(wb, `${filename}.xlsx`)
   }
 
-  // ===== EXPORT PDF =====
+  // ===== EXPORT PDF (ANONIM) =====
   const handleExportPDF = () => {
     if (!teacher || !scores) return
 
@@ -196,7 +193,7 @@ export default function TeacherDetailPage() {
     doc.text('LAPORAN PENILAIAN KINERJA GURU', 14, 15)
     doc.setFontSize(10)
     doc.setTextColor(100, 100, 100)
-    doc.text(`Tanggal: ${new Date().toLocaleString('id-ID')}`, 14, 22)
+    doc.text(`Tanggal: ${new Date().toLocaleDateString('id-ID')}`, 14, 22)
 
     // Info Guru
     doc.setFontSize(12)
@@ -232,17 +229,17 @@ export default function TeacherDetailPage() {
       Object.entries(CATEGORY_LABELS).forEach(([key, label]) => {
         const counts = categoryCounts[key]
         const totalAnswers = Object.values(counts).reduce((a, b) => a + b, 0)
-        distRows.push([label, '', '', '', ''])
+        distRows.push([label, '', '', ''])
         for (let s = 5; s >= 1; s--) {
           const count = counts[s as keyof CategoryCount] || 0
           const pct = totalAnswers > 0 ? (count / totalAnswers) * 100 : 0
-          distRows.push(['', SCORE_LABELS[s as 1|2|3|4|5], String(count), `${pct.toFixed(1)}%`, ''])
+          distRows.push(['', SCORE_LABELS[s as 1|2|3|4|5], String(count), `${pct.toFixed(1)}%`])
         }
       })
     }
 
     autoTable(doc, {
-      head: [['Kategori', 'Tingkat Penilaian', 'Jumlah', 'Persentase', '']],
+      head: [['Kategori', 'Tingkat Penilaian', 'Jumlah', 'Persentase']],
       body: distRows,
       theme: 'grid',
       headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
@@ -250,11 +247,11 @@ export default function TeacherDetailPage() {
       alternateRowStyles: { fillColor: [245, 247, 250] },
     })
 
-    // Saran Masukan
+    // Saran Masukan (ANONIM - tanpa nama siswa)
     const lastY = (doc as any).lastAutoTable.finalY + 10
     doc.setFontSize(12)
     doc.setTextColor(0, 0, 0)
-    doc.text('Saran & Masukan dari Siswa', 14, lastY)
+    doc.text('Rekap Saran & Masukan dari Siswa (Anonim)', 14, lastY)
 
     if (feedbacks.length === 0) {
       doc.setFontSize(10)
@@ -262,22 +259,29 @@ export default function TeacherDetailPage() {
       doc.text('Tidak ada saran/masukan dari siswa', 14, lastY + 8)
     } else {
       let yPos = lastY + 8
+      doc.setFontSize(10)
+      doc.setTextColor(100, 100, 100)
+      doc.text(`Total ${feedbacks.length} masukan dari siswa:`, 14, yPos)
+      yPos += 6
+
       feedbacks.forEach((fb, idx) => {
         if (yPos > 270) {
           doc.addPage()
           yPos = 20
         }
-        doc.setFontSize(10)
         doc.setTextColor(0, 0, 0)
-        doc.text(`${idx + 1}. ${fb.student_name} (NIS: ${fb.nis})`, 14, yPos)
-        yPos += 5
-        doc.setTextColor(100, 100, 100)
         doc.setFontSize(9)
-        const splitFeedback = doc.splitTextToSize(fb.feedback, 180)
+        const prefix = `${idx + 1}. `
+        const splitFeedback = doc.splitTextToSize(prefix + fb.feedback, 180)
         doc.text(splitFeedback, 14, yPos)
-        yPos += splitFeedback.length * 5 + 5
+        yPos += splitFeedback.length * 4.5 + 3
       })
     }
+
+    // Footer anonim
+    doc.setFontSize(8)
+    doc.setTextColor(150, 150, 150)
+    doc.text('* Data bersifat anonim - identitas siswa tidak ditampilkan', 14, 285)
 
     // Download
     const filename = `Laporan_${teacher.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`
@@ -478,23 +482,8 @@ export default function TeacherDetailPage() {
             <div className="space-y-3">
               {feedbacks.map((fb, idx) => (
                 <div key={idx} className="border-l-4 border-indigo-400 bg-gray-50 p-4 rounded-r-lg">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <p className="font-semibold text-gray-900">{fb.student_name}</p>
-                      <p className="text-xs text-gray-500">NIS: {fb.nis}</p>
-                    </div>
-                    <span className="text-xs text-gray-400">
-                      {new Date(fb.submitted_at).toLocaleDateString('id-ID', {
-                        day: 'numeric',
-                        month: 'long',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </span>
-                  </div>
                   <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">
-                    {fb.feedback}
+                    <span className="font-semibold text-indigo-700">#{idx + 1}</span> {fb.feedback}
                   </p>
                 </div>
               ))}
@@ -522,7 +511,7 @@ export default function TeacherDetailPage() {
             </button>
           </div>
           <p className="text-xs text-gray-500 mt-3">
-            💡 File akan langsung terdownload di browser Anda. Excel memiliki 4 sheet: Info, Analisis, Distribusi, dan Saran Masukan.
+            💡 File akan langsung terdownload di browser Anda. Data siswa bersifat anonim di laporan.
           </p>
         </div>
       </main>

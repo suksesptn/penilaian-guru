@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { exportMultiSheetExcel } from '@/lib/exportUtils'
 import { useRouter } from 'next/navigation'
+import * as XLSX from 'xlsx'
 
 interface TeacherScore {
   id: number
@@ -23,11 +23,34 @@ function getCookie(name: string): string | null {
   return match ? decodeURIComponent(match[2]) : null
 }
 
+const CATEGORY_LABELS: Record<string, string> = {
+  kepribadian: 'Kepribadian',
+  sosial: 'Sosial',
+  pedagogik: 'Pedagogik',
+  profesional: 'Profesional'
+}
+
+const SCORE_LABELS: Record<number, string> = {
+  1: 'Sangat Kurang Baik',
+  2: 'Kurang Baik',
+  3: 'Cukup',
+  4: 'Baik',
+  5: 'Sangat Baik'
+}
+
+const getScoreLabel = (score: number) => {
+  if (score >= 80) return 'Sangat Baik'
+  if (score >= 60) return 'Baik'
+  if (score >= 40) return 'Cukup'
+  return 'Perlu Perbaikan'
+}
+
 export default function AdminDashboard() {
   const router = useRouter()
   const [teachers, setTeachers] = useState<TeacherScore[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     const adminAuth = getCookie('admin_auth')
@@ -80,42 +103,144 @@ export default function AdminDashboard() {
     return 'bg-gray-100 text-gray-700 border border-gray-300'
   }
 
-  const handleExportAll = () => {
-  if (teachers.length === 0) {
-    alert('Belum ada data untuk diexport')
-    return
+  // ===== EXPORT EXCEL DENGAN SHEET PER GURU =====
+  const handleExportAll = async () => {
+    if (teachers.length === 0) {
+      alert('Belum ada data untuk diexport')
+      return
+    }
+
+    setExporting(true)
+    try {
+      const wb = XLSX.utils.book_new()
+      const today = new Date().toISOString().split('T')[0]
+
+      // ===== Sheet 1: Ranking =====
+      const rankingData = teachers.map((t, idx) => ({
+        Rank: idx + 1,
+        'Nama Guru': t.name,
+        'Mata Pelajaran': t.subject,
+        Responden: t.student_count,
+        Kepribadian: t.scores.kepribadian.toFixed(2),
+        Sosial: t.scores.sosial.toFixed(2),
+        Pedagogik: t.scores.pedagogik.toFixed(2),
+        Profesional: t.scores.profesional.toFixed(2),
+        Total: t.scores.total.toFixed(2)
+      }))
+      const wsRanking = XLSX.utils.json_to_sheet(rankingData)
+      wsRanking['!cols'] = [
+        { wch: 6 }, { wch: 30 }, { wch: 20 }, { wch: 12 },
+        { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 8 }
+      ]
+      XLSX.utils.book_append_sheet(wb, wsRanking, 'Ranking Guru')
+
+      // ===== Sheet 2: Summary =====
+      const avgScore = teachers.length > 0
+        ? (teachers.reduce((sum, t) => sum + t.scores.total, 0) / teachers.length).toFixed(2)
+        : '0'
+      const totalRespondents = teachers.reduce((sum, t) => sum + t.student_count, 0)
+      const summaryData = [
+        { Metric: 'Total Guru', Value: teachers.length },
+        { Metric: 'Total Responden', Value: totalRespondents },
+        { Metric: 'Rata-rata Skor', Value: avgScore },
+        { Metric: 'Guru Terbaik', Value: teachers[0]?.name || '-' },
+        { Metric: 'Tanggal Export', Value: new Date().toLocaleString('id-ID') },
+      ]
+      const wsSummary = XLSX.utils.json_to_sheet(summaryData)
+      wsSummary['!cols'] = [{ wch: 20 }, { wch: 40 }]
+      XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
+
+      // ===== Sheet Per Guru (dengan detail seperti PDF) =====
+      for (const teacher of teachers) {
+        try {
+          // Fetch detail guru
+          const res = await fetch(`/api/admin/teachers/${teacher.id}`)
+          const data = await res.json()
+
+          if (!res.ok) continue
+
+          const detail = data
+          const categoryCounts = detail.category_counts || {}
+          const feedbacks = detail.feedbacks || []
+          const studentCount = detail.student_count || 0
+
+          // Nama sheet (max 31 karakter)
+          let sheetName = `${teacher.name}`
+          sheetName = sheetName.replace(/[\\\/\?\*\[\]:]/g, '')
+          if (sheetName.length > 31) sheetName = sheetName.substring(0, 31)
+
+          const sheets: any[] = []
+
+          // Info
+          sheets.push({ Field: 'Nama Guru', Value: teacher.name })
+          sheets.push({ Field: 'Mata Pelajaran', Value: teacher.subject })
+          sheets.push({ Field: 'Jumlah Responden', Value: `${studentCount} siswa` })
+          sheets.push({ Field: 'Skor Total', Value: teacher.scores.total.toFixed(2) })
+          sheets.push({ Field: 'Tanggal Export', Value: new Date().toLocaleString('id-ID') })
+
+          const wsInfo = XLSX.utils.json_to_sheet(sheets)
+          wsInfo['!cols'] = [{ wch: 25 }, { wch: 40 }]
+          XLSX.utils.book_append_sheet(wb, wsInfo, `${sheetName}`)
+
+          // Analisis Kategori
+          const catData = [
+            { Kategori: 'Kepribadian', Pertanyaan: '1-3', Skor: teacher.scores.kepribadian.toFixed(2), Keterangan: getScoreLabel(teacher.scores.kepribadian) },
+            { Kategori: 'Sosial', Pertanyaan: '4-6', Skor: teacher.scores.sosial.toFixed(2), Keterangan: getScoreLabel(teacher.scores.sosial) },
+            { Kategori: 'Pedagogik', Pertanyaan: '7-9', Skor: teacher.scores.pedagogik.toFixed(2), Keterangan: getScoreLabel(teacher.scores.pedagogik) },
+            { Kategori: 'Profesional', Pertanyaan: '10-12', Skor: teacher.scores.profesional.toFixed(2), Keterangan: getScoreLabel(teacher.scores.profesional) },
+          ]
+          const wsCat = XLSX.utils.json_to_sheet(catData)
+          wsCat['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 20 }]
+          XLSX.utils.book_append_sheet(wb, wsCat, `${sheetName} - Analisis`)
+
+          // Distribusi Jawaban
+          const distData: any[] = []
+          Object.entries(CATEGORY_LABELS).forEach(([key, label]) => {
+            const counts = categoryCounts[key] || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+            const totalAnswers = Object.values(counts).reduce((a: number, b: any) => a + b, 0)
+            distData.push({ Kategori: label, 'Tingkat Penilaian': '', Jumlah: '', Persentase: '' })
+            for (let s = 5; s >= 1; s--) {
+              const count = counts[s as keyof typeof counts] || 0
+              const pct = totalAnswers > 0 ? (count / totalAnswers) * 100 : 0
+              distData.push({
+                Kategori: '',
+                'Tingkat Penilaian': SCORE_LABELS[s as 1|2|3|4|5],
+                Jumlah: count,
+                Persentase: `${pct.toFixed(1)}%`
+              })
+            }
+          })
+          const wsDist = XLSX.utils.json_to_sheet(distData)
+          wsDist['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 12 }]
+          XLSX.utils.book_append_sheet(wb, wsDist, `${sheetName} - Distribusi`)
+
+          // Saran Masukan (ANONIM)
+          const feedbackData = feedbacks.map((fb: any, idx: number) => ({
+            No: idx + 1,
+            'Saran/Masukan': fb.feedback
+          }))
+          if (feedbackData.length === 0) {
+            feedbackData.push({ No: 1, 'Saran/Masukan': 'Tidak ada saran/masukan dari siswa' })
+          }
+          const wsFb = XLSX.utils.json_to_sheet(feedbackData)
+          wsFb['!cols'] = [{ wch: 5 }, { wch: 80 }]
+          XLSX.utils.book_append_sheet(wb, wsFb, `${sheetName} - Saran`)
+
+        } catch (err) {
+          console.error(`Error exporting teacher ${teacher.name}:`, err)
+        }
+      }
+
+      // Download
+      const filename = `Rekap_Penilaian_Guru_${today}`
+      XLSX.writeFile(wb, `${filename}.xlsx`)
+
+    } catch (err: any) {
+      alert('Gagal export: ' + err.message)
+    } finally {
+      setExporting(false)
+    }
   }
-
-  // Sheet 1: Ranking
-  const rankingData = teachers.map((t, idx) => ({
-    Rank: idx + 1,
-    'Nama Guru': t.name,
-    'Mata Pelajaran': t.subject,
-    Responden: t.student_count,
-    Kepribadian: t.scores.kepribadian.toFixed(2),
-    Sosial: t.scores.sosial.toFixed(2),
-    Pedagogik: t.scores.pedagogik.toFixed(2),
-    Profesional: t.scores.profesional.toFixed(2),
-    Total: t.scores.total.toFixed(2)
-  }))
-
-  // Sheet 2: Summary
-  const summaryData = [
-    { Metric: 'Total Guru', Value: teachers.length },
-    { Metric: 'Total Responden', Value: teachers.reduce((s, t) => s + t.student_count, 0) },
-    { Metric: 'Rata-rata Skor', Value: (teachers.reduce((s, t) => s + t.scores.total, 0) / teachers.length).toFixed(2) },
-    { Metric: 'Guru Terbaik', Value: teachers[0]?.name || '-' },
-    { Metric: 'Tanggal Export', Value: new Date().toLocaleString('id-ID') },
-  ]
-
-  exportMultiSheetExcel(
-    [
-      { name: 'Ranking Guru', data: rankingData },
-      { name: 'Summary', data: summaryData }
-    ],
-    `Rekap_Penilaian_Guru_${new Date().toISOString().split('T')[0]}`
-  )
-}
 
   const averageScore = teachers.length > 0
     ? (teachers.reduce((sum, t) => sum + t.scores.total, 0) / teachers.length).toFixed(2)
@@ -206,14 +331,13 @@ export default function AdminDashboard() {
               <h2 className="text-lg font-bold text-gray-900">🏆 Ranking Guru Berdasarkan Skor Total</h2>
               <p className="text-sm text-gray-500 mt-1">Klik nama guru untuk melihat detail analisis</p>
             </div>
-
             <button
-            onClick={handleExportAll}
-            disabled={teachers.length === 0}
-            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-medium text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            📥 Export Semua ke Excel
-          </button>
+              onClick={handleExportAll}
+              disabled={exporting || teachers.length === 0}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-medium text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {exporting ? '⏳ Memproses...' : '📥 Export Semua ke Excel'}
+            </button>
           </div>
 
           {loading ? (
@@ -286,7 +410,7 @@ export default function AdminDashboard() {
         {/* Footer Info */}
         <div className="mt-6 text-center text-xs text-gray-400">
           <p>💡 Tip: Klik baris guru untuk melihat analisis detail per kategori</p>
-          <p className="mt-1">Terakhir diupdate: {new Date().toLocaleString('id-ID')}</p>
+          <p className="mt-1">Export Excel akan membuat sheet terpisah untuk setiap guru</p>
         </div>
       </main>
     </div>
