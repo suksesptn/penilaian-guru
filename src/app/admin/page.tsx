@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { exportMultiSheetExcel } from '@/lib/exportUtils'
 import { useRouter } from 'next/navigation'
 
 interface TeacherScore {
@@ -78,6 +79,43 @@ export default function AdminDashboard() {
     if (index === 2) return 'bg-orange-300 text-orange-900 border-2 border-orange-500'
     return 'bg-gray-100 text-gray-700 border border-gray-300'
   }
+
+  const handleExportAll = () => {
+  if (teachers.length === 0) {
+    alert('Belum ada data untuk diexport')
+    return
+  }
+
+  // Sheet 1: Ranking
+  const rankingData = teachers.map((t, idx) => ({
+    Rank: idx + 1,
+    'Nama Guru': t.name,
+    'Mata Pelajaran': t.subject,
+    Responden: t.student_count,
+    Kepribadian: t.scores.kepribadian.toFixed(2),
+    Sosial: t.scores.sosial.toFixed(2),
+    Pedagogik: t.scores.pedagogik.toFixed(2),
+    Profesional: t.scores.profesional.toFixed(2),
+    Total: t.scores.total.toFixed(2)
+  }))
+
+  // Sheet 2: Summary
+  const summaryData = [
+    { Metric: 'Total Guru', Value: teachers.length },
+    { Metric: 'Total Responden', Value: teachers.reduce((s, t) => s + t.student_count, 0) },
+    { Metric: 'Rata-rata Skor', Value: (teachers.reduce((s, t) => s + t.scores.total, 0) / teachers.length).toFixed(2) },
+    { Metric: 'Guru Terbaik', Value: teachers[0]?.name || '-' },
+    { Metric: 'Tanggal Export', Value: new Date().toLocaleString('id-ID') },
+  ]
+
+  exportMultiSheetExcel(
+    [
+      { name: 'Ranking Guru', data: rankingData },
+      { name: 'Summary', data: summaryData }
+    ],
+    `Rekap_Penilaian_Guru_${new Date().toISOString().split('T')[0]}`
+  )
+}
 
   const averageScore = teachers.length > 0
     ? (teachers.reduce((sum, t) => sum + t.scores.total, 0) / teachers.length).toFixed(2)
@@ -170,12 +208,12 @@ export default function AdminDashboard() {
             </div>
 
             <button
-              onClick={() => alert('Fitur Export Excel akan segera hadir!')}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-medium text-sm flex items-center gap-2 opacity-50 cursor-not-allowed"
-              disabled
-            >
-              📥 Export Semua ke Excel (Segera)
-            </button>
+            onClick={handleExportAll}
+            disabled={teachers.length === 0}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-medium text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            📥 Export Semua ke Excel
+          </button>
           </div>
 
           {loading ? (

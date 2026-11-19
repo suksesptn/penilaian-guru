@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import * as XLSX from 'xlsx'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
 interface CategoryCount {
   1: number
@@ -100,6 +103,185 @@ export default function TeacherDetailPage() {
     if (score >= 60) return 'bg-blue-500'
     if (score >= 40) return 'bg-yellow-500'
     return 'bg-red-500'
+  }
+
+  const getScoreLabel = (score: number) => {
+    if (score >= 80) return 'Sangat Baik'
+    if (score >= 60) return 'Baik'
+    if (score >= 40) return 'Cukup'
+    return 'Perlu Perbaikan'
+  }
+
+  // ===== EXPORT EXCEL =====
+  const handleExportExcel = () => {
+    if (!teacher || !scores) return
+
+    const wb = XLSX.utils.book_new()
+
+    // Sheet 1: Info Guru
+    const infoData = [
+      { Field: 'Nama Guru', Value: teacher.name },
+      { Field: 'Mata Pelajaran', Value: teacher.subject },
+      { Field: 'Jumlah Responden', Value: `${studentCount} siswa` },
+      { Field: 'Skor Total', Value: scores.total.toFixed(2) },
+      { Field: 'Tanggal Export', Value: new Date().toLocaleString('id-ID') },
+    ]
+    const wsInfo = XLSX.utils.json_to_sheet(infoData)
+    wsInfo['!cols'] = [{ wch: 25 }, { wch: 40 }]
+    XLSX.utils.book_append_sheet(wb, wsInfo, 'Info Guru')
+
+    // Sheet 2: Analisis Kategori
+    const categoryData = [
+      { Kategori: 'Kepribadian', Pertanyaan: '1-3', Skor: scores.kepribadian.toFixed(2), Keterangan: getScoreLabel(scores.kepribadian) },
+      { Kategori: 'Sosial', Pertanyaan: '4-6', Skor: scores.sosial.toFixed(2), Keterangan: getScoreLabel(scores.sosial) },
+      { Kategori: 'Pedagogik', Pertanyaan: '7-9', Skor: scores.pedagogik.toFixed(2), Keterangan: getScoreLabel(scores.pedagogik) },
+      { Kategori: 'Profesional', Pertanyaan: '10-12', Skor: scores.profesional.toFixed(2), Keterangan: getScoreLabel(scores.profesional) },
+    ]
+    const wsCategory = XLSX.utils.json_to_sheet(categoryData)
+    wsCategory['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 20 }]
+    XLSX.utils.book_append_sheet(wb, wsCategory, 'Analisis Kategori')
+
+    // Sheet 3: Distribusi Jawaban
+    const distData: any[] = []
+    if (categoryCounts) {
+      Object.entries(CATEGORY_LABELS).forEach(([key, label]) => {
+        const counts = categoryCounts[key]
+        const totalAnswers = Object.values(counts).reduce((a, b) => a + b, 0)
+        distData.push({ Kategori: label, 'Tingkat Penilaian': '', Jumlah: '', Persentase: '' })
+        for (let s = 5; s >= 1; s--) {
+          const count = counts[s as keyof CategoryCount] || 0
+          const pct = totalAnswers > 0 ? (count / totalAnswers) * 100 : 0
+          distData.push({
+            Kategori: '',
+            'Tingkat Penilaian': SCORE_LABELS[s as 1|2|3|4|5],
+            Jumlah: count,
+            Persentase: `${pct.toFixed(1)}%`
+          })
+        }
+      })
+    }
+    const wsDist = XLSX.utils.json_to_sheet(distData)
+    wsDist['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 12 }]
+    XLSX.utils.book_append_sheet(wb, wsDist, 'Distribusi Jawaban')
+
+    // Sheet 4: Saran Masukan
+    const feedbackData = feedbacks.map((fb, idx) => ({
+      No: idx + 1,
+      'Nama Siswa': fb.student_name,
+      NIS: fb.nis,
+      Tanggal: new Date(fb.submitted_at).toLocaleString('id-ID'),
+      'Saran/Masukan': fb.feedback
+    }))
+    if (feedbackData.length === 0) {
+      feedbackData.push({ No: 1, 'Nama Siswa': '', NIS: '', Tanggal: '', 'Saran/Masukan': 'Tidak ada saran/masukan dari siswa' })
+    }
+    const wsFeedback = XLSX.utils.json_to_sheet(feedbackData)
+    wsFeedback['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 15 }, { wch: 25 }, { wch: 60 }]
+    XLSX.utils.book_append_sheet(wb, wsFeedback, 'Saran Masukan')
+
+    // Download
+    const filename = `Laporan_${teacher.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`
+    XLSX.writeFile(wb, `${filename}.xlsx`)
+  }
+
+  // ===== EXPORT PDF =====
+  const handleExportPDF = () => {
+    if (!teacher || !scores) return
+
+    const doc = new jsPDF()
+
+    // Header
+    doc.setFontSize(16)
+    doc.setTextColor(79, 70, 229)
+    doc.text('LAPORAN PENILAIAN KINERJA GURU', 14, 15)
+    doc.setFontSize(10)
+    doc.setTextColor(100, 100, 100)
+    doc.text(`Tanggal: ${new Date().toLocaleString('id-ID')}`, 14, 22)
+
+    // Info Guru
+    doc.setFontSize(12)
+    doc.setTextColor(0, 0, 0)
+    doc.text('Informasi Guru', 14, 30)
+    doc.setFontSize(10)
+    doc.text(`Nama: ${teacher.name}`, 14, 36)
+    doc.text(`Mata Pelajaran: ${teacher.subject}`, 14, 42)
+    doc.text(`Jumlah Responden: ${studentCount} siswa`, 14, 48)
+    doc.text(`Skor Total: ${scores.total.toFixed(2)} (${getScoreLabel(scores.total)})`, 14, 54)
+
+    // Tabel Analisis Kategori
+    const categoryRows = Object.entries(CATEGORY_LABELS).map(([key, label]) => [
+      label,
+      key === 'kepribadian' ? '1-3' : key === 'sosial' ? '4-6' : key === 'pedagogik' ? '7-9' : '10-12',
+      scores[key].toFixed(2),
+      getScoreLabel(scores[key])
+    ])
+
+    autoTable(doc, {
+      startY: 60,
+      head: [['Kategori', 'Pertanyaan', 'Skor', 'Keterangan']],
+      body: categoryRows,
+      theme: 'grid',
+      headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 10, cellPadding: 3 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+    })
+
+    // Tabel Distribusi Jawaban
+    const distRows: string[][] = []
+    if (categoryCounts) {
+      Object.entries(CATEGORY_LABELS).forEach(([key, label]) => {
+        const counts = categoryCounts[key]
+        const totalAnswers = Object.values(counts).reduce((a, b) => a + b, 0)
+        distRows.push([label, '', '', '', ''])
+        for (let s = 5; s >= 1; s--) {
+          const count = counts[s as keyof CategoryCount] || 0
+          const pct = totalAnswers > 0 ? (count / totalAnswers) * 100 : 0
+          distRows.push(['', SCORE_LABELS[s as 1|2|3|4|5], String(count), `${pct.toFixed(1)}%`, ''])
+        }
+      })
+    }
+
+    autoTable(doc, {
+      head: [['Kategori', 'Tingkat Penilaian', 'Jumlah', 'Persentase', '']],
+      body: distRows,
+      theme: 'grid',
+      headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 9, cellPadding: 2 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+    })
+
+    // Saran Masukan
+    const lastY = (doc as any).lastAutoTable.finalY + 10
+    doc.setFontSize(12)
+    doc.setTextColor(0, 0, 0)
+    doc.text('Saran & Masukan dari Siswa', 14, lastY)
+
+    if (feedbacks.length === 0) {
+      doc.setFontSize(10)
+      doc.setTextColor(150, 150, 150)
+      doc.text('Tidak ada saran/masukan dari siswa', 14, lastY + 8)
+    } else {
+      let yPos = lastY + 8
+      feedbacks.forEach((fb, idx) => {
+        if (yPos > 270) {
+          doc.addPage()
+          yPos = 20
+        }
+        doc.setFontSize(10)
+        doc.setTextColor(0, 0, 0)
+        doc.text(`${idx + 1}. ${fb.student_name} (NIS: ${fb.nis})`, 14, yPos)
+        yPos += 5
+        doc.setTextColor(100, 100, 100)
+        doc.setFontSize(9)
+        const splitFeedback = doc.splitTextToSize(fb.feedback, 180)
+        doc.text(splitFeedback, 14, yPos)
+        yPos += splitFeedback.length * 5 + 5
+      })
+    }
+
+    // Download
+    const filename = `Laporan_${teacher.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`
+    doc.save(`${filename}.pdf`)
   }
 
   if (loading) {
@@ -318,6 +500,30 @@ export default function TeacherDetailPage() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Tombol Export */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-4">📥 Export Laporan</h2>
+          <div className="flex gap-3 flex-wrap">
+            <button
+              onClick={handleExportExcel}
+              disabled={!teacher || !scores}
+              className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+            >
+              📊 Export Excel
+            </button>
+            <button
+              onClick={handleExportPDF}
+              disabled={!teacher || !scores}
+              className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+            >
+              📄 Export PDF
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            💡 File akan langsung terdownload di browser Anda. Excel memiliki 4 sheet: Info, Analisis, Distribusi, dan Saran Masukan.
+          </p>
         </div>
       </main>
     </div>
