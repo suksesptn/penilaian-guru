@@ -30,12 +30,19 @@ const CATEGORY_LABELS: Record<string, string> = {
   profesional: 'Profesional'
 }
 
+const CATEGORY_QUESTIONS: Record<string, string> = {
+  kepribadian: '1-3',
+  sosial: '4-6',
+  pedagogik: '7-9',
+  profesional: '10-12'
+}
+
 const SCORE_LABELS: Record<number, string> = {
-  1: 'Sangat Kurang Baik',
-  2: 'Kurang Baik',
-  3: 'Cukup',
+  5: 'Sangat Baik',
   4: 'Baik',
-  5: 'Sangat Baik'
+  3: 'Cukup',
+  2: 'Kurang Baik',
+  1: 'Sangat Kurang Baik'
 }
 
 const getScoreLabel = (score: number) => {
@@ -103,7 +110,7 @@ export default function AdminDashboard() {
     return 'bg-gray-100 text-gray-700 border border-gray-300'
   }
 
-  // ===== EXPORT EXCEL DENGAN SHEET PER GURU =====
+  // ===== EXPORT EXCEL (FORMAT SESUAI FILE CONTOH) =====
   const handleExportAll = async () => {
     if (teachers.length === 0) {
       alert('Belum ada data untuk diexport')
@@ -113,45 +120,47 @@ export default function AdminDashboard() {
     setExporting(true)
     try {
       const wb = XLSX.utils.book_new()
-      const today = new Date().toISOString().split('T')[0]
+      const today = new Date().toLocaleDateString('id-ID')
 
-      // ===== Sheet 1: Ranking =====
-      const rankingData = teachers.map((t, idx) => ({
-        Rank: idx + 1,
-        'Nama Guru': t.name,
-        'Mata Pelajaran': t.subject,
-        Responden: t.student_count,
-        Kepribadian: t.scores.kepribadian.toFixed(2),
-        Sosial: t.scores.sosial.toFixed(2),
-        Pedagogik: t.scores.pedagogik.toFixed(2),
-        Profesional: t.scores.profesional.toFixed(2),
-        Total: t.scores.total.toFixed(2)
-      }))
-      const wsRanking = XLSX.utils.json_to_sheet(rankingData)
+      // ===== Sheet 1: Ranking Guru =====
+      const rankingRows: any[] = [
+        ['REKAPITULASI PENILAIAN KINERJA GURU'],
+        [`Tanggal: ${today}`],
+        [],
+        ['Rank', 'Nama Guru', 'Mata Pelajaran', 'Responden', 'Kepribadian', 'Sosial', 'Pedagogik', 'Profesional', 'Total']
+      ]
+
+      teachers.forEach((t, idx) => {
+        rankingRows.push([
+          idx + 1,
+          t.name,
+          t.subject,
+          t.student_count,
+          t.scores.kepribadian.toFixed(2),
+          t.scores.sosial.toFixed(2),
+          t.scores.pedagogik.toFixed(2),
+          t.scores.profesional.toFixed(2),
+          t.scores.total.toFixed(2)
+        ])
+      })
+
+      const wsRanking = XLSX.utils.aoa_to_sheet(rankingRows)
       wsRanking['!cols'] = [
         { wch: 6 }, { wch: 30 }, { wch: 20 }, { wch: 12 },
-        { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 8 }
+        { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 10 }
       ]
       XLSX.utils.book_append_sheet(wb, wsRanking, 'Ranking Guru')
 
-      // ===== Sheet 2: Summary =====
-      const avgScore = teachers.length > 0
-        ? (teachers.reduce((sum, t) => sum + t.scores.total, 0) / teachers.length).toFixed(2)
-        : '0'
-      const totalRespondents = teachers.reduce((sum, t) => sum + t.student_count, 0)
-      const summaryData = [
-        { Metric: 'Total Guru', Value: teachers.length },
-        { Metric: 'Total Responden', Value: totalRespondents },
-        { Metric: 'Rata-rata Skor', Value: avgScore },
-        { Metric: 'Guru Terbaik', Value: teachers[0]?.name || '-' },
-        { Metric: 'Tanggal Export', Value: new Date().toLocaleString('id-ID') },
-      ]
-      const wsSummary = XLSX.utils.json_to_sheet(summaryData)
-      wsSummary['!cols'] = [{ wch: 20 }, { wch: 40 }]
-      XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
+      // ===== Sheet Per Guru =====
+      for (let i = 0; i < teachers.length; i++) {
+        const teacher = teachers[i]
+        const sheetNum = i + 1
 
-      // ===== Sheet Per Guru (dengan detail seperti PDF) =====
-      for (const teacher of teachers) {
+        // Nama sheet (max 31 karakter)
+        let sheetName = `${sheetNum}. ${teacher.name}`
+        sheetName = sheetName.replace(/[\\\/\?\*\[\]:]/g, '')
+        if (sheetName.length > 31) sheetName = sheetName.substring(0, 31)
+
         try {
           // Fetch detail guru
           const res = await fetch(`/api/admin/teachers/${teacher.id}`)
@@ -164,67 +173,69 @@ export default function AdminDashboard() {
           const feedbacks = detail.feedbacks || []
           const studentCount = detail.student_count || 0
 
-          // Nama sheet (max 31 karakter)
-          let sheetName = `${teacher.name}`
-          sheetName = sheetName.replace(/[\\\/\?\*\[\]:]/g, '')
-          if (sheetName.length > 31) sheetName = sheetName.substring(0, 31)
+          const rows: any[] = []
 
-          const sheets: any[] = []
+          // Header
+          rows.push(['LAPORAN DETAIL GURU'])
+          rows.push([])
 
-          // Info
-          sheets.push({ Field: 'Nama Guru', Value: teacher.name })
-          sheets.push({ Field: 'Mata Pelajaran', Value: teacher.subject })
-          sheets.push({ Field: 'Jumlah Responden', Value: `${studentCount} siswa` })
-          sheets.push({ Field: 'Skor Total', Value: teacher.scores.total.toFixed(2) })
-          sheets.push({ Field: 'Tanggal Export', Value: new Date().toLocaleString('id-ID') })
+          // Info Guru
+          rows.push(['Nama Guru', teacher.name])
+          rows.push(['Mata Pelajaran', teacher.subject])
+          rows.push(['Jumlah Responden', `${studentCount} siswa`])
+          rows.push(['Skor Total', teacher.scores.total.toFixed(2)])
+          rows.push([])
 
-          const wsInfo = XLSX.utils.json_to_sheet(sheets)
-          wsInfo['!cols'] = [{ wch: 25 }, { wch: 40 }]
-          XLSX.utils.book_append_sheet(wb, wsInfo, `${sheetName}`)
-
-          // Analisis Kategori
-          const catData = [
-            { Kategori: 'Kepribadian', Pertanyaan: '1-3', Skor: teacher.scores.kepribadian.toFixed(2), Keterangan: getScoreLabel(teacher.scores.kepribadian) },
-            { Kategori: 'Sosial', Pertanyaan: '4-6', Skor: teacher.scores.sosial.toFixed(2), Keterangan: getScoreLabel(teacher.scores.sosial) },
-            { Kategori: 'Pedagogik', Pertanyaan: '7-9', Skor: teacher.scores.pedagogik.toFixed(2), Keterangan: getScoreLabel(teacher.scores.pedagogik) },
-            { Kategori: 'Profesional', Pertanyaan: '10-12', Skor: teacher.scores.profesional.toFixed(2), Keterangan: getScoreLabel(teacher.scores.profesional) },
-          ]
-          const wsCat = XLSX.utils.json_to_sheet(catData)
-          wsCat['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 20 }]
-          XLSX.utils.book_append_sheet(wb, wsCat, `${sheetName} - Analisis`)
+          // Analisis Skor Per Kategori
+          rows.push(['ANALISIS SKOR PER KATEGORI'])
+          rows.push(['Kategori', 'Skor'])
+          rows.push(['Kepribadian', teacher.scores.kepribadian.toFixed(2)])
+          rows.push(['Sosial', teacher.scores.sosial.toFixed(2)])
+          rows.push(['Pedagogik', teacher.scores.pedagogik.toFixed(2)])
+          rows.push(['Profesional', teacher.scores.profesional.toFixed(2)])
+          rows.push([])
 
           // Distribusi Jawaban
-          const distData: any[] = []
+          rows.push(['DISTRIBUSI JAWABAN'])
+          rows.push(['Kategori', 'Tingkat', 'Jumlah', 'Persentase'])
+
           Object.entries(CATEGORY_LABELS).forEach(([key, label]) => {
+            rows.push([label])
             const counts = categoryCounts[key] || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
             const totalAnswers = Object.values(counts).reduce((a: number, b: any) => a + b, 0)
-            distData.push({ Kategori: label, 'Tingkat Penilaian': '', Jumlah: '', Persentase: '' })
+
             for (let s = 5; s >= 1; s--) {
               const count = counts[s as keyof typeof counts] || 0
               const pct = totalAnswers > 0 ? (count / totalAnswers) * 100 : 0
-              distData.push({
-                Kategori: '',
-                'Tingkat Penilaian': SCORE_LABELS[s as 1|2|3|4|5],
-                Jumlah: count,
-                Persentase: `${pct.toFixed(1)}%`
-              })
+              rows.push(['', SCORE_LABELS[s as 1|2|3|4|5], count, `${pct.toFixed(1)}%`])
             }
           })
-          const wsDist = XLSX.utils.json_to_sheet(distData)
-          wsDist['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 12 }]
-          XLSX.utils.book_append_sheet(wb, wsDist, `${sheetName} - Distribusi`)
 
-          // Saran Masukan (ANONIM)
-          const feedbackData = feedbacks.map((fb: any, idx: number) => ({
-            No: idx + 1,
-            'Saran/Masukan': fb.feedback
-          }))
-          if (feedbackData.length === 0) {
-            feedbackData.push({ No: 1, 'Saran/Masukan': 'Tidak ada saran/masukan dari siswa' })
+          rows.push([])
+
+          // Saran & Masukan Siswa
+          rows.push(['SARAN & MASUKAN SISWA'])
+          rows.push(['No', 'Nama Siswa', 'NIS', 'Tanggal', 'Saran/Masukan'])
+
+          if (feedbacks.length === 0) {
+            rows.push(['', '', '', '', 'Tidak ada saran/masukan'])
+          } else {
+            feedbacks.forEach((fb: any, idx: number) => {
+              rows.push([
+                idx + 1,
+                fb.student_name || '',
+                fb.nis || '',
+                fb.submitted_at ? new Date(fb.submitted_at).toLocaleString('id-ID') : '',
+                fb.feedback || ''
+              ])
+            })
           }
-          const wsFb = XLSX.utils.json_to_sheet(feedbackData)
-          wsFb['!cols'] = [{ wch: 5 }, { wch: 80 }]
-          XLSX.utils.book_append_sheet(wb, wsFb, `${sheetName} - Saran`)
+
+          const ws = XLSX.utils.aoa_to_sheet(rows)
+          ws['!cols'] = [
+            { wch: 25 }, { wch: 35 }, { wch: 15 }, { wch: 25 }, { wch: 60 }
+          ]
+          XLSX.utils.book_append_sheet(wb, ws, sheetName)
 
         } catch (err) {
           console.error(`Error exporting teacher ${teacher.name}:`, err)
@@ -232,7 +243,7 @@ export default function AdminDashboard() {
       }
 
       // Download
-      const filename = `Rekap_Penilaian_Guru_${today}`
+      const filename = `Rekap_Penilaian_Guru_${new Date().toISOString().split('T')[0]}`
       XLSX.writeFile(wb, `${filename}.xlsx`)
 
     } catch (err: any) {
