@@ -118,8 +118,10 @@ export default function TeacherDetailPage() {
 
     const wb = XLSX.utils.book_new()
 
-    // Sheet 1: Info Guru
+    // Sheet 1: Info Guru (Dengan Judul Laporan di Bagian Atas)
     const infoData = [
+      { Field: 'LAPORAN DETAIL UMPAN BALIK SISWA', Value: '' },
+      { Field: '', Value: '' },
       { Field: 'Nama Guru', Value: teacher.name },
       { Field: 'Mata Pelajaran', Value: teacher.subject },
       { Field: 'Jumlah Responden', Value: `${studentCount} siswa` },
@@ -127,7 +129,7 @@ export default function TeacherDetailPage() {
       { Field: 'Tanggal Export', Value: new Date().toLocaleString('id-ID') },
     ]
     const wsInfo = XLSX.utils.json_to_sheet(infoData)
-    wsInfo['!cols'] = [{ wch: 25 }, { wch: 40 }]
+    wsInfo['!cols'] = [{ wch: 35 }, { wch: 50 }]
     XLSX.utils.book_append_sheet(wb, wsInfo, 'Info Guru')
 
     // Sheet 2: Analisis Kategori
@@ -164,20 +166,29 @@ export default function TeacherDetailPage() {
     wsDist['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 12 }]
     XLSX.utils.book_append_sheet(wb, wsDist, 'Distribusi Jawaban')
 
-    // Sheet 4: Saran Masukan (ANONIM - tanpa nama siswa)
-    const feedbackData = feedbacks.map((fb, idx) => ({
-      No: idx + 1,
-      'Saran/Masukan': fb.feedback
-    }))
-    if (feedbackData.length === 0) {
+    // Sheet 4: Saran Masukan (ANONIM)
+    const feedbackData: any[] = []
+    if (feedbacks.length === 0) {
       feedbackData.push({ No: 1, 'Saran/Masukan': 'Tidak ada saran/masukan dari siswa' })
+    } else {
+      feedbacks.forEach((fb, idx) => {
+        if (fb.feedback && fb.feedback.trim() !== '') {
+          feedbackData.push({
+            No: idx + 1,
+            'Saran/Masukan': fb.feedback.trim()
+          })
+        }
+      })
+      if (feedbackData.length === 0) {
+        feedbackData.push({ No: 1, 'Saran/Masukan': 'Tidak ada saran/masukan dari siswa' })
+      }
     }
     const wsFeedback = XLSX.utils.json_to_sheet(feedbackData)
-    wsFeedback['!cols'] = [{ wch: 5 }, { wch: 80 }]
+    wsFeedback['!cols'] = [{ wch: 5 }, { wch: 100 }]
     XLSX.utils.book_append_sheet(wb, wsFeedback, 'Saran Masukan')
 
-    // Download
-    const filename = `Laporan_${teacher.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`
+    // Download (Nama File Diubah)
+    const filename = `Laporan_Umpan_Balik_Siswa_${teacher.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`
     XLSX.writeFile(wb, `${filename}.xlsx`)
   }
 
@@ -187,23 +198,23 @@ export default function TeacherDetailPage() {
 
     const doc = new jsPDF()
 
-    // Header
+    // Header (Judul Diubah)
     doc.setFontSize(16)
     doc.setTextColor(79, 70, 229)
-    doc.text('LAPORAN PENILAIAN KINERJA GURU', 14, 15)
+    doc.text('LAPORAN ANGKET UMPAN BALIK SISWA', 14, 15)
     doc.setFontSize(10)
     doc.setTextColor(100, 100, 100)
     doc.text(`Tanggal: ${new Date().toLocaleDateString('id-ID')}`, 14, 22)
 
-    // Info Guru
+    // Informasi Guru (Di Bagian Atas)
     doc.setFontSize(12)
     doc.setTextColor(0, 0, 0)
-    doc.text('Informasi Guru', 14, 30)
+    doc.text('Informasi Guru', 14, 32)
     doc.setFontSize(10)
-    doc.text(`Nama: ${teacher.name}`, 14, 36)
-    doc.text(`Mata Pelajaran: ${teacher.subject}`, 14, 42)
-    doc.text(`Jumlah Responden: ${studentCount} siswa`, 14, 48)
-    doc.text(`Skor Total: ${scores.total.toFixed(2)} (${getScoreLabel(scores.total)})`, 14, 54)
+    doc.text(`Nama: ${teacher.name}`, 14, 38)
+    doc.text(`Mata Pelajaran: ${teacher.subject}`, 14, 44)
+    doc.text(`Jumlah Responden: ${studentCount} siswa`, 14, 50)
+    doc.text(`Skor Total: ${scores.total.toFixed(2)} (${getScoreLabel(scores.total)})`, 14, 56)
 
     // Tabel Analisis Kategori
     const categoryRows = Object.entries(CATEGORY_LABELS).map(([key, label]) => [
@@ -214,7 +225,7 @@ export default function TeacherDetailPage() {
     ])
 
     autoTable(doc, {
-      startY: 60,
+      startY: 62,
       head: [['Kategori', 'Pertanyaan', 'Skor', 'Keterangan']],
       body: categoryRows,
       theme: 'grid',
@@ -239,6 +250,7 @@ export default function TeacherDetailPage() {
     }
 
     autoTable(doc, {
+      startY: (doc as any).lastAutoTable.finalY + 10,
       head: [['Kategori', 'Tingkat Penilaian', 'Jumlah', 'Persentase']],
       body: distRows,
       theme: 'grid',
@@ -247,7 +259,7 @@ export default function TeacherDetailPage() {
       alternateRowStyles: { fillColor: [245, 247, 250] },
     })
 
-    // Saran Masukan (ANONIM - tanpa nama siswa)
+    // Saran Masukan (ANONIM)
     const lastY = (doc as any).lastAutoTable.finalY + 10
     doc.setFontSize(12)
     doc.setTextColor(0, 0, 0)
@@ -283,8 +295,8 @@ export default function TeacherDetailPage() {
     doc.setTextColor(150, 150, 150)
     doc.text('* Data bersifat anonim - identitas siswa tidak ditampilkan', 14, 285)
 
-    // Download
-    const filename = `Laporan_${teacher.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`
+    // Download (Nama File Diubah)
+    const filename = `Laporan_Umpan_Balik_Siswa_${teacher.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`
     doc.save(`${filename}.pdf`)
   }
 
@@ -329,7 +341,7 @@ export default function TeacherDetailPage() {
             </svg>
             Kembali ke Dashboard
           </button>
-          <h1 className="text-2xl font-bold">Detail Penilaian Guru</h1>
+          <h1 className="text-2xl font-bold">Detail Umpan Balik Siswa</h1>
           <p className="text-gray-300 mt-1">
             {teacher.name} • {teacher.subject}
           </p>
@@ -377,7 +389,7 @@ export default function TeacherDetailPage() {
           
           {studentCount === 0 ? (
             <div className="text-center py-8 text-gray-500">
-              Belum ada data penilaian untuk guru ini
+              Belum ada data umpan balik untuk guru ini
             </div>
           ) : (
             <div className="space-y-5">
@@ -475,7 +487,7 @@ export default function TeacherDetailPage() {
           {feedbacks.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               {studentCount === 0 
-                ? 'Belum ada penilaian untuk guru ini'
+                ? 'Belum ada umpan balik untuk guru ini'
                 : 'Belum ada siswa yang memberikan saran/masukan'}
             </div>
           ) : (
