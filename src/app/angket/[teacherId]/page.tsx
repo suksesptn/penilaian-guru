@@ -14,28 +14,29 @@ interface Question {
   text: string
 }
 
-// 12 Pertanyaan
+// 12 Pertanyaan Baru
 const QUESTIONS: Question[] = [
-  { no: 1, text: 'Guru menunjukkan keteladanan dalam bertindak dan berbicara di hadapan siswa.' },
-  { no: 2, text: 'Guru bersikap jujur dan adil dalam menilai serta memperlakukan semua siswa.' },
-  { no: 3, text: 'Guru menunjukkan sikap terbuka dan mau menerima masukan dari siswa.' },
-  { no: 4, text: 'Guru mampu berkomunikasi dengan baik dan jelas kepada siswa.' },
-  { no: 5, text: 'Guru menghargai pendapat, perasaan, dan perbedaan antar siswa.' },
-  { no: 6, text: 'Guru mudah diajak berkonsultasi ketika siswa mengalami kesulitan.' },
-  { no: 7, text: 'Guru menjelaskan materi pelajaran dengan jelas dan mudah dipahami.' },
-  { no: 8, text: 'Guru menggunakan metode mengajar yang bervariasi dan menarik.' },
-  { no: 9, text: 'Guru mampu mengelola kelas dengan baik dan menciptakan suasana belajar yang kondusif.' },
-  { no: 10, text: 'Guru menguasai materi pelajaran yang diajarkan dengan baik.' },
-  { no: 11, text: 'Guru memberikan tugas dan latihan yang sesuai dengan materi yang diajarkan.' },
-  { no: 12, text: 'Guru memberikan umpan balik yang konstruktif terhadap hasil belajar siswa.' },
+  { no: 1, text: 'Menunjukkan keteladanan dalam kedisiplinan, ketepatan waktu dan mengarahkan siswa untuk mentaati aturan yang berlaku' },
+  { no: 2, text: 'Mampu mengendalikan emosi, bersikap adil, menghargai siswa dan memperlakukan semua siswa dengan baik' },
+  { no: 3, text: 'Menunjukkan kesholehan, keistiqomahan, adab yang Islami dan ketaatan beribadah' },
+  { no: 4, text: 'Berkomunikasi dengan siswa secara sopan, ramah dan terbuka' },
+  { no: 5, text: 'Menunjukkan sikap peduli, empati, dan kesediaan membantu siswa ketika menghadapi kesulitan' },
+  { no: 6, text: 'Membangun hubungan yang baik dengan siswa, menjalin keakraban, hangat dan berinteraksi secara baik dengan siswa' },
+  { no: 7, text: 'Menjelaskan materi pelajaran dengan jelas, sistematis, dan mudah dipahami oleh siswa' },
+  { no: 8, text: 'Pembelajarannya menarik, kondusif, bervariasi, melibatkan siswa dan tidak membosankan' },
+  { no: 9, text: 'Memberikan penilaian yang adil, terbuka, transparan dan ada umpan balik serta tindak lanjut' },
+  { no: 10, text: 'Menguasai materi, berwawasan luas dan memberikan jawaban dengan memuaskan' },
+  { no: 11, text: 'Mampu menghubungkan materi pelajaran dengan penerapan dalam kehidupan nyata serta perkembangan IPTEK' },
+  { no: 12, text: 'Mampu menginspirasi siswa dalam mengembangkan potensi, minat dan bakat pada pelajaran yang diajarkannya' },
 ]
 
+// Opsi Skala (Nilai backend tetap 1-5 agar perhitungan skor tidak rusak)
 const SCALE_OPTIONS = [
-  { value: 1, label: 'Sangat Kurang Baik' },
-  { value: 2, label: 'Kurang Baik' },
-  { value: 3, label: 'Cukup' },
-  { value: 4, label: 'Baik' },
-  { value: 5, label: 'Sangat Baik' },
+  { value: 1, label: 'Sangat Tidak Setuju' },
+  { value: 2, label: 'Tidak Setuju' },
+  { value: 3, label: 'Ragu-ragu' },
+  { value: 4, label: 'Setuju' },
+  { value: 5, label: 'Sangat Setuju' },
 ]
 
 export default function AngketPage() {
@@ -160,6 +161,7 @@ export default function AngketPage() {
   }
 
   const answeredCount = Object.keys(answers).length
+  const totalQuestions = QUESTIONS.length
 
   return (
     <div className="min-h-screen bg-gray-50 pb-32">
@@ -177,13 +179,13 @@ export default function AngketPage() {
               Kembali
             </button>
             <span className="text-sm font-semibold text-indigo-600">
-              {answeredCount} / 12
+              {answeredCount} / {totalQuestions}
             </span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2">
             <div
               className="bg-gradient-to-r from-indigo-500 to-purple-600 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${(answeredCount / 12) * 100}%` }}
+              style={{ width: `${(answeredCount / totalQuestions) * 100}%` }}
             ></div>
           </div>
         </div>
@@ -207,7 +209,7 @@ export default function AngketPage() {
         {/* Instructions */}
         <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg mb-6">
           <p className="text-sm text-blue-900">
-            <strong>📝 Petunjuk:</strong> Berikan penilaian untuk setiap pernyataan di bawah ini dengan memilih salah satu dari 5 pilihan jawaban.
+            <strong>📝 Petunjuk:</strong> Berikan penilaian untuk setiap pernyataan di bawah ini dengan memilih salah satu dari 5 pilihan jawaban yang tersedia.
           </p>
         </div>
 
@@ -222,25 +224,13 @@ export default function AngketPage() {
                 <span className="leading-relaxed">{q.text}</span>
               </p>
 
-              {/* Scale Options - Like Likert Scale */}
-              <div className="ml-8">
-                {/* Numbers */}
-                <div className="grid grid-cols-5 gap-4 mb-2">
-                  {SCALE_OPTIONS.map(option => (
-                    <div key={option.value} className="text-center">
-                      <div className="text-sm font-semibold text-gray-700 mb-2">
-                        {option.value}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Radio Buttons */}
-                <div className="grid grid-cols-5 gap-4">
+              {/* Scale Options - Clean Layout */}
+              <div className="ml-0 sm:ml-8">
+                <div className="grid grid-cols-5 gap-1 sm:gap-4">
                   {SCALE_OPTIONS.map(option => {
                     const isSelected = answers[q.no] === option.value
                     return (
-                      <label key={option.value} className="flex flex-col items-center cursor-pointer">
+                      <label key={option.value} className="flex flex-col items-center cursor-pointer group">
                         <input
                           type="radio"
                           name={`q-${q.no}`}
@@ -249,24 +239,23 @@ export default function AngketPage() {
                           onChange={() => handleAnswerChange(q.no, option.value)}
                           className="sr-only"
                         />
-                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                        {/* Radio Button Circle */}
+                        <div className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full border-2 flex items-center justify-center transition-all mb-1 sm:mb-2 ${
                           isSelected
-                            ? 'border-indigo-600 bg-indigo-600'
-                            : 'border-gray-400 hover:border-indigo-400'
+                            ? 'border-indigo-600 bg-indigo-600 shadow-md'
+                            : 'border-gray-400 group-hover:border-indigo-400 bg-white'
                         }`}>
                           {isSelected && (
-                            <div className="w-3 h-3 rounded-full bg-white"></div>
+                            <div className="w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-white"></div>
                           )}
+                        </div>
+                        {/* Full Label Below */}
+                        <div className="text-[10px] sm:text-xs text-gray-700 text-center leading-tight font-medium px-1">
+                          {option.label}
                         </div>
                       </label>
                     )
                   })}
-                </div>
-
-                {/* Labels */}
-                <div className="flex justify-between mt-3 text-xs text-gray-600">
-                  <span>Sangat Kurang Baik</span>
-                  <span>Sangat Baik</span>
                 </div>
               </div>
             </div>
@@ -277,17 +266,17 @@ export default function AngketPage() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-6">
           <h2 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
             <span>💬</span>
-            Saran & Masukan
+            Harapan & Masukan
           </h2>
           <p className="text-sm text-gray-600 mb-3">
-            Tuliskan saran, kritik, atau apresiasi Anda untuk guru ini.
+            Tuliskan harapan kamu terhadap guru ini secara singkat dibawah ini (Jika ada) :
           </p>
           <textarea
             value={openFeedback}
             onChange={(e) => setOpenFeedback(e.target.value)}
             rows={5}
             maxLength={1000}
-            placeholder="Contoh: Saya sangat senang dengan cara mengajar guru ini yang sabar dan jelas..."
+            placeholder="Contoh: Semoga Bapak/Ibu guru selalu sehat dan semakin semangat mengajar..."
             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none resize-none text-gray-900 placeholder-gray-400"
             style={{ color: '#111827' }}
           ></textarea>
@@ -309,7 +298,7 @@ export default function AngketPage() {
                 : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 shadow-md'
             }`}
           >
-            {submitting ? 'Mengirim...' : isComplete() ? '✅ KIRIM PENILAIAN' : `Jawab ${12 - answeredCount} pertanyaan lagi`}
+            {submitting ? 'Mengirim...' : isComplete() ? '✅ KIRIM PENILAIAN' : `Jawab ${totalQuestions - answeredCount} pertanyaan lagi`}
           </button>
         </div>
       </div>
