@@ -30,6 +30,22 @@ export async function POST(request: NextRequest) {
       .eq('teacher_id', teacher_id)
       .single()
 
+    if (error) {
+      // Cek apakah error karena duplikasi
+      if (error.code === '23505') {
+        // 23505 adalah kode error PostgreSQL untuk unique violation
+        return NextResponse.json(
+          { error: 'Anda sudah mengisi angket untuk guru ini sebelumnya.' },
+          { status: 400 }
+        )
+      }
+      // Error lain
+      return NextResponse.json(
+        { error: 'Gagal menyimpan penilaian: ' + error.message },
+        { status: 500 }
+      )
+    }
+
     if (existing) {
       return NextResponse.json(
         { error: 'Anda sudah mengisi angket untuk guru ini.' },
