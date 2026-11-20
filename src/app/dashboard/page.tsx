@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [showLogoutWarning, setShowLogoutWarning] = useState(false)
 
   useEffect(() => {
     const studentId = getCookie('student_id')
@@ -72,6 +73,14 @@ export default function DashboardPage() {
   }
 
   const handleLogout = () => {
+    const allFilled = teachers.length > 0 && teachers.every(t => t.is_filled)
+    
+    if (!allFilled) {
+      setShowLogoutWarning(true)
+      setTimeout(() => setShowLogoutWarning(false), 4000)
+      return
+    }
+
     const cookies = ['student_id', 'student_nis', 'student_name', 'student_class_id', 'student_class_name']
     cookies.forEach(name => {
       document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`
@@ -98,6 +107,7 @@ export default function DashboardPage() {
   const filledCount = teachers.filter(t => t.is_filled).length
   const unfilledCount = teachers.length - filledCount
   const progressPercent = teachers.length > 0 ? (filledCount / teachers.length) * 100 : 0
+  const allCompleted = teachers.length > 0 && filledCount === teachers.length
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -112,15 +122,60 @@ export default function DashboardPage() {
             <p className="text-sm text-white hidden sm:block">
               Halo, <span className="font-semibold">{student.name}</span>
             </p>
-            <button
-              onClick={handleLogout}
-              className="px-4 py-2 text-sm bg-white/20 hover:bg-white/30 text-white rounded-lg transition font-medium backdrop-blur-sm"
-            >
-              Keluar
-            </button>
+            <div className="relative group">
+              <button
+                onClick={handleLogout}
+                disabled={!allCompleted}
+                className={`px-4 py-2 text-sm rounded-lg transition font-medium flex items-center gap-2 ${
+                  allCompleted
+                    ? 'bg-white/20 hover:bg-white/30 text-white backdrop-blur-sm cursor-pointer'
+                    : 'bg-white/10 text-white/60 cursor-not-allowed'
+                }`}
+                title={allCompleted ? 'Keluar dari aplikasi' : 'Selesaikan semua angket terlebih dahulu'}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                {allCompleted ? 'Keluar' : 'Selesaikan Dulu'}
+              </button>
+              
+              {/* Tooltip saat hover */}
+              {!allCompleted && (
+                <div className="absolute right-0 top-full mt-2 w-64 bg-red-600 text-white text-xs rounded-lg shadow-lg p-3 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                  <div className="font-semibold mb-1">⚠️ Belum Bisa Keluar</div>
+                  <div>Selesaikan semua angket terlebih dahulu ({unfilledCount} guru belum dinilai)</div>
+                  <div className="absolute -top-1 right-4 w-2 h-2 bg-red-600 rotate-45"></div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
+
+      {/* Warning Banner jika klik tombol saat belum selesai */}
+      {showLogoutWarning && (
+        <div className="max-w-7xl mx-auto px-4 pt-4">
+          <div className="bg-amber-50 border-l-4 border-amber-500 rounded-r-lg shadow-md p-4 flex items-center gap-3 animate-pulse">
+            <div className="flex-shrink-0 w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <p className="font-bold text-amber-900">⚠️ Belum Bisa Keluar!</p>
+              <p className="text-sm text-amber-800">
+                Kamu masih harus menilai <strong>{unfilledCount} guru</strong> lagi. Selesaikan semua angket terlebih dahulu sebelum keluar.
+              </p>
+            </div>
+            <button 
+              onClick={() => setShowLogoutWarning(false)}
+              className="text-amber-600 hover:text-amber-900 font-bold text-xl"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-6">
@@ -225,23 +280,41 @@ export default function DashboardPage() {
         </div>
 
         {/* Progress Bar */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <div className="flex justify-between items-center mb-3">
-            <h2 className="text-lg font-bold text-gray-900">📊 Progress Pengisian</h2>
-            <span className="text-sm font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">
+        <div className={`rounded-lg shadow p-6 mb-6 border-2 ${
+          allCompleted 
+            ? 'bg-gradient-to-br from-green-50 to-emerald-50 border-green-400' 
+            : 'bg-white border-gray-200'
+        }`}>
+          <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
+            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              📊 Progress Pengisian
+              {allCompleted && <span className="text-sm bg-green-500 text-white px-2 py-0.5 rounded-full">✓ Selesai</span>}
+            </h2>
+            <span className={`text-sm font-bold px-3 py-1 rounded-full ${
+              allCompleted 
+                ? 'bg-green-500 text-white' 
+                : 'bg-indigo-100 text-indigo-700'
+            }`}>
               {filledCount} / {teachers.length} guru
             </span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
             <div
-              className="bg-gradient-to-r from-indigo-500 to-purple-600 h-3 rounded-full transition-all duration-700 ease-out"
+              className={`h-3 rounded-full transition-all duration-700 ease-out ${
+                allCompleted 
+                  ? 'bg-gradient-to-r from-green-500 to-emerald-500' 
+                  : 'bg-gradient-to-r from-indigo-500 to-purple-600'
+              }`}
               style={{ width: `${progressPercent}%` }}
             ></div>
           </div>
-          <p className="text-sm text-gray-600 mt-3">
-            {filledCount === teachers.length && teachers.length > 0
-              ? '🎉 Semua angket sudah diisi! Terima kasih atas partisipasimu.'
-              : `⏳ Masih ada ${unfilledCount} guru yang belum dinilai`}
+          <p className={`text-sm mt-3 font-medium ${
+            allCompleted ? 'text-green-700' : 'text-gray-600'
+          }`}>
+            {allCompleted
+              ? '🎉 Semua angket sudah diisi! Terima kasih atas partisipasimu. Kamu sekarang bisa keluar.'
+              : `⏳ Masih ada ${unfilledCount} guru yang belum dinilai. Selesaikan semua sebelum keluar.`
+            }
           </p>
         </div>
 
