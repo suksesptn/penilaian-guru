@@ -22,38 +22,30 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Cek apakah sudah submit sebelumnya
-    const { data: existing } = await supabase
+    // 1. Cek apakah sudah submit sebelumnya (PERBAIKAN DI SINI)
+    const { data: existing, error: checkError } = await supabase
       .from('evaluations')
       .select('id')
       .eq('student_id', studentId)
       .eq('teacher_id', teacher_id)
-      .single()
+      .maybeSingle() // maybeSingle() lebih aman daripada single() jika data belum ada
 
-    if (error) {
-      // Cek apakah error karena duplikasi
-      if (error.code === '23505') {
-        // 23505 adalah kode error PostgreSQL untuk unique violation
-        return NextResponse.json(
-          { error: 'Anda sudah mengisi angket untuk guru ini sebelumnya.' },
-          { status: 400 }
-        )
-      }
-      // Error lain
+    if (checkError) {
+      console.error('❌ Error checking existing evaluation:', checkError)
       return NextResponse.json(
-        { error: 'Gagal menyimpan penilaian: ' + error.message },
+        { error: 'Gagal memeriksa status penilaian' },
         { status: 500 }
       )
     }
 
     if (existing) {
       return NextResponse.json(
-        { error: 'Anda sudah mengisi angket untuk guru ini.' },
+        { error: 'Anda sudah mengisi angket untuk guru ini sebelumnya.' },
         { status: 400 }
       )
     }
 
-    // Insert header evaluation
+    // 2. Insert header evaluation
     const { data: evaluation, error: evalError } = await supabase
       .from('evaluations')
       .insert({
@@ -66,13 +58,22 @@ export async function POST(request: NextRequest) {
 
     if (evalError || !evaluation) {
       console.error('❌ Error creating evaluation:', evalError)
+      
+      // Jika error karena unique constraint (meski sudah dicek di atas, ini pengaman ganda)
+      if (evalError.code === '23505') {
+        return NextResponse.json(
+          { error: 'Anda sudah mengisi angket untuk guru ini sebelumnya.' },
+          { status: 400 }
+        )
+      }
+
       return NextResponse.json(
         { error: 'Gagal menyimpan data penilaian' },
         { status: 500 }
       )
     }
 
-    // Insert detail answers (12 pertanyaan)
+    // 3. Insert detail answers (12 pertanyaan)
     const answerRows = answers.map((a: any) => ({
       evaluation_id: evaluation.id,
       question_no: a.question_no,
@@ -85,24 +86,26 @@ export async function POST(request: NextRequest) {
 
     if (answersError) {
       console.error('❌ Error creating answers:', answersError)
-      // Rollback: hapus evaluation yang baru dibuat
+      
+      // Rollback: hapus evaluation yang baru dibuat agar tidak ada data sampah
       await supabase.from('evaluations').delete().eq('id', evaluation.id)
+      
       return NextResponse.json(
-        { error: 'Gagal menyimpan jawaban' },
+        { error: 'Gagal menyimpan jawaban detail' },
         { status: 500 }
       )
     }
 
-    console.log('✅ Angket berhasil disimpan untuk guru', teacher_id)
+    console.log('✅ Angket berhasil disimpan untuk guru', teacher_id, 'oleh siswa', studentId)
 
     return NextResponse.json({
       success: true,
       message: 'Penilaian berhasil disimpan'
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('💥 Submit error:', error)
     return NextResponse.json(
-      { error: 'Terjadi kesalahan server' },
+      { error: 'Terjadi kesalahan server: ' + error.message },
       { status: 500 }
     )
   }
