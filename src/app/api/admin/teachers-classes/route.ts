@@ -1,71 +1,106 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
-// GET - Ambil kelas yang diajar guru tertentu
-export async function GET(request: NextRequest) {
+// ===== GET: Ambil semua korelasi guru-kelas =====
+export async function GET() {
   try {
-    const adminAuth = request.cookies.get('admin_auth')?.value
-    if (adminAuth !== 'true') {
-      return NextResponse.json({ error: 'Tidak terautentikasi' }, { status: 401 })
-    }
-
-    const teacherId = request.nextUrl.searchParams.get('teacher_id')
-    if (!teacherId) {
-      return NextResponse.json({ error: 'teacher_id wajib' }, { status: 400 })
-    }
-
     const { data, error } = await supabase
       .from('teacher_classes')
-      .select('class_id')
-      .eq('teacher_id', parseInt(teacherId))
+      .select(`
+        id,
+        teacher_id,
+        class_id,
+        teachers ( id, name, subject ),
+        classes ( id, name )
+      `)
 
-    if (error) throw error
+    if (error) {
+      console.error('❌ GET teacher_classes error:', error)
+      return NextResponse.json(
+        { error: 'Gagal memuat data korelasi: ' + error.message },
+        { status: 500 }
+      )
+    }
 
-    const classIds = (data || []).map(tc => tc.class_id)
-    return NextResponse.json({ success: true, class_ids: classIds })
-  } catch (error: any) {
-    console.error('Error fetching teacher classes:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ correlations: data || [] })
+  } catch (err: any) {
+    console.error('💥 GET error:', err)
+    return NextResponse.json(
+      { error: 'Terjadi kesalahan server: ' + err.message },
+      { status: 500 }
+    )
   }
 }
 
-// POST - Update korelasi guru-kelas (replace semua)
+// ===== POST: Simpan korelasi untuk 1 guru (HAPUS DULU, LALU INSERT) =====
 export async function POST(request: NextRequest) {
   try {
-    const adminAuth = request.cookies.get('admin_auth')?.value
-    if (adminAuth !== 'true') {
-      return NextResponse.json({ error: 'Tidak terautentikasi' }, { status: 401 })
-    }
-
     const { teacher_id, class_ids } = await request.json()
 
-    if (!teacher_id || !Array.isArray(class_ids)) {
-      return NextResponse.json({ error: 'Data tidak valid' }, { status: 400 })
+    // Validasi input
+    if (!teacher_id) {
+      return NextResponse.json(
+        { error: 'teacher_id wajib diisi' },
+        { status: 400 }
+      )
     }
 
-    // Hapus semua korelasi lama guru ini
-    await supabase
+    // Pastikan class_ids adalah array (handle jika null/undefined)
+    const validClassIds = Array.isArray(class_ids)
+      ? class_ids.filter((id: any) => id !== null && id !== undefined && id !== '')
+      : []
+
+    // STEP 1: Hapus SEMUA korelasi guru ini terlebih dahulu
+    // Ini mencegah unique constraint violation saat insert ulang
+    const { error: deleteError } = await supabase
       .from('teacher_classes')
       .delete()
       .eq('teacher_id', teacher_id)
 
-    // Insert korelasi baru
-    if (class_ids.length > 0) {
-      const rows = class_ids.map((classId: number) => ({
-        teacher_id: teacher_id,
-        class_id: classId
-      }))
-
-      const { error } = await supabase
-        .from('teacher_classes')
-        .insert(rows)
-
-      if (error) throw error
+    if (deleteError) {
+      console.error('❌ Delete korelasi error:', deleteError)
+      return NextResponse.json(
+        { error: 'Gagal menghapus korelasi lama: ' + deleteError.message },
+        { status: 500 }
+      )
     }
 
-    return NextResponse.json({ success: true, count: class_ids.length })
-  } catch (error: any) {
-    console.error('Error saving teacher classes:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    // STEP 2: Jika tidak ada kelas yang dipilih, simpan kosong (guru tidak mengajar)
+    if (validClassIds.length === 0) {
+      return NextResponse.json({
+        success: true,
+        message: 'Korelasi berhasil disimpan (guru tidak mengajar kelas manapun)'
+      })
+    }
+
+    // STEP 3: Insert korelasi baru
+    const newRows = validClassIds.map((class_id: any) => ({
+      teacher_id: parseInt(teacher_id),
+      class_id: parseInt(class_id),
+    }))
+
+    const { error: insertError } = await supabase
+      .from('teacher_classes')
+      .insert(newRows)
+
+    if (insertError) {
+      console.error('❌ Insert korelasi error:', insertError)
+      // Rollback jika insert gagal (opsional, karena delete sudah terjadi)
+      return NextResponse.json(
+        { error: 'Gagal menyimpan korelasi: ' + insertError.message },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Berhasil menyimpan ${validClassIds.length} korelasi`
+    })
+  } catch (err: any) {
+    console.error('💥 POST error:', err)
+    return NextResponse.json(
+      { error: 'Terjadi kesalahan server: ' + err.message },
+      { status: 500 }
+    )
   }
 }
