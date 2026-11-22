@@ -194,7 +194,7 @@ export default function AngketPage() {
       {/* Teacher Info */}
       <div className="max-w-4xl mx-auto px-4 py-6">
         <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl shadow-lg p-6 text-white mb-6">
-          <p className="text-sm opacity-90 mb-1">Penilaian untuk Guru</p>
+          <p className="text-sm opacity-90 mb-1">Angket Umpan Balik Siswa</p>
           <h1 className="text-2xl font-bold">{teacher.name}</h1>
           <p className="text-lg opacity-90 mt-1">📚 {teacher.subject}</p>
         </div>
