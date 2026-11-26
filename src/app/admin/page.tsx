@@ -45,6 +45,15 @@ const getScoreLabel = (score: number) => {
   return 'Perlu Perbaikan'
 }
 
+// Helper: rata-tengahkan sel judul (merge + center)
+function centerTitle(ws: XLSX.WorkSheet, rowIdx: number, colStart: number, colEnd: number, text: string) {
+  const addr = XLSX.utils.encode_cell({ r: rowIdx, c: colStart })
+  ws[addr] = { t: 's', v: text }
+  if (!ws['!merges']) ws['!merges'] = []
+  ws['!merges'].push({ s: { r: rowIdx, c: colStart }, e: { r: rowIdx, c: colEnd } })
+  ws[addr] = { ...ws[addr], s: { alignment: { horizontal: 'center' } } }
+}
+
 export default function AdminDashboard() {
   const router = useRouter()
   const [teachers, setTeachers] = useState<TeacherScore[]>([])
@@ -67,7 +76,6 @@ export default function AdminDashboard() {
       setError('')
       const res = await fetch('/api/admin/teachers')
       const data = await res.json()
-
       if (!res.ok) throw new Error(data.error || 'Gagal memuat data')
       setTeachers(data.teachers || [])
     } catch (err: any) {
@@ -103,7 +111,7 @@ export default function AdminDashboard() {
     return 'bg-gray-100 text-gray-700 border border-gray-300'
   }
 
-  // ===== EXPORT EXCEL PER KELAS (UPDATE BARU) =====
+  // ===== EXPORT EXCEL (REVISI: REKAP + PER KELAS + DETAIL PER KELAS) =====
   const handleExportAll = async () => {
     if (teachers.length === 0) {
       alert('Belum ada data untuk diexport')
@@ -115,174 +123,218 @@ export default function AdminDashboard() {
       const wb = XLSX.utils.book_new()
       const today = new Date().toLocaleDateString('id-ID')
 
-      // ===== Sheet 1: Rekapitulasi (1 baris per guru+kelas) =====
-      const rankingRows: any[] = [
-        ['REKAPITULASI ANGKET UMPAN BALIK SISWA'],
-        [`Tanggal: ${today}`],
-        [],
-        ['Rank', 'Nama Guru', 'Mata Pelajaran', 'Kelas', 'Responden', 'Kepribadian', 'Sosial', 'Pedagogik', 'Profesional', 'Total']
-      ]
-
-      let rank = 1
-      const teacherDetails: any[] = []
-
-      // Fetch detail semua guru sekaligus untuk data ranking + sheet detail
+      // ---------- Fetch detail semua guru (untuk sheet per kelas + detail) ----------
+      const teacherDetails: { teacher: TeacherScore; data: any }[] = []
       for (const teacher of teachers) {
         try {
           const res = await fetch(`/api/admin/teachers/${teacher.id}`)
           const data = await res.json()
-          if (!res.ok) continue
-
-          teacherDetails.push({ teacher, data })
-
-          const classes = data.classes || []
-          const scoresByClass = data.scores_by_class || {}
-          const studentCountByClass = data.student_count_by_class || {}
-
-          if (classes.length === 0) {
-            // Guru belum dinilai
-            rankingRows.push([
-              rank++, teacher.name, teacher.subject, '-', 0, 0, 0, 0, 0, 0
-            ])
-          } else {
-            // 1 baris per kelas
-            for (const cls of classes) {
-              const scores = scoresByClass[String(cls.id)] || { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0, total: 0 }
-              const count = studentCountByClass[String(cls.id)] || 0
-              rankingRows.push([
-                rank++,
-                teacher.name,
-                teacher.subject,
-                cls.name,
-                count,
-                scores.kepribadian.toFixed(2),
-                scores.sosial.toFixed(2),
-                scores.pedagogik.toFixed(2),
-                scores.profesional.toFixed(2),
-                scores.total.toFixed(2)
-              ])
-            }
-          }
+          if (res.ok) teacherDetails.push({ teacher, data })
         } catch (err) {
-          console.error(`Error export teacher ${teacher.name}:`, err)
+          console.error(`Error fetch detail ${teacher.name}:`, err)
         }
       }
 
-      const wsRanking = XLSX.utils.aoa_to_sheet(rankingRows)
-      wsRanking['!cols'] = [
-        { wch: 6 }, { wch: 30 }, { wch: 20 }, { wch: 12 }, { wch: 12 },
-        { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 10 }
+      // ============================================================
+      // SHEET 1: REKAPITULASI SEMUA GURU
+      // ============================================================
+      const rekapRows: any[] = [
+        [], // row 0: diisi judul via centerTitle
+        [`Tanggal: ${today}`],
+        [`Total Guru: ${teachers.length} | Total Responden: ${teachers.reduce((s, t) => s + t.student_count, 0)} siswa`],
+        [],
+        ['No', 'Nama Guru', 'Mata Pelajaran', 'Kepribadian', 'Sosial', 'Pedagogik', 'Profesional', 'Skor Total', 'Keterangan'],
       ]
-      XLSX.utils.book_append_sheet(wb, wsRanking, 'Rekapitulasi')
 
-      // ===== Sheet Per Guru+Kelas =====
+      const sortedAll = [...teachers].sort((a, b) => b.scores.total - a.scores.total)
+      sortedAll.forEach((t, idx) => {
+        rekapRows.push([
+          idx + 1,
+          t.name,
+          t.subject,
+          `${t.scores.kepribadian.toFixed(1)}%`,
+          `${t.scores.sosial.toFixed(1)}%`,
+          `${t.scores.pedagogik.toFixed(1)}%`,
+          `${t.scores.profesional.toFixed(1)}%`,
+          `${t.scores.total.toFixed(2)}%`,
+          getScoreLabel(t.scores.total),
+        ])
+      })
+
+      const wsRekap = XLSX.utils.aoa_to_sheet(rekapRows)
+      centerTitle(wsRekap, 0, 0, 8, 'REKAPITULASI ANGKET UMPAN BALIK SISWA — SEMUA GURU')
+      wsRekap['!cols'] = [
+        { wch: 5 }, { wch: 30 }, { wch: 22 }, { wch: 13 }, { wch: 10 },
+        { wch: 12 }, { wch: 13 }, { wch: 12 }, { wch: 16 },
+      ]
+      XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekapitulasi Guru')
+
+      // ============================================================
+      // SHEET 2: REKAPITULASI PER KELAS
+      // ============================================================
+      const perClassRows: any[] = [
+        [], // judul via centerTitle
+        [`Tanggal: ${today}`],
+        [],
+        ['No', 'Nama Guru', 'Mata Pelajaran', 'Kelas', 'Kepribadian', 'Sosial', 'Pedagogik', 'Profesional', 'Skor Total', 'Keterangan'],
+      ]
+
+      const perClassList: any[] = []
+      for (const { teacher, data } of teacherDetails) {
+        const classes = data.classes || []
+        const scoresByClass = data.scores_by_class || {}
+        const countByClass = data.student_count_by_class || {}
+
+        if (classes.length === 0) {
+          perClassList.push({
+            name: teacher.name, subject: teacher.subject, kelas: '-',
+            scores: { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0, total: 0 },
+            count: 0,
+          })
+        } else {
+          for (const cls of classes) {
+            perClassList.push({
+              name: teacher.name, subject: teacher.subject, kelas: cls.name,
+              scores: scoresByClass[String(cls.id)] || { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0, total: 0 },
+              count: countByClass[String(cls.id)] || 0,
+            })
+          }
+        }
+      }
+
+      perClassList.sort((a, b) => b.scores.total - a.scores.total)
+      perClassList.forEach((r, idx) => {
+        perClassRows.push([
+          idx + 1, r.name, r.subject, r.kelas,
+          `${r.scores.kepribadian.toFixed(1)}%`,
+          `${r.scores.sosial.toFixed(1)}%`,
+          `${r.scores.pedagogik.toFixed(1)}%`,
+          `${r.scores.profesional.toFixed(1)}%`,
+          `${r.scores.total.toFixed(2)}%`,
+          getScoreLabel(r.scores.total),
+        ])
+      })
+
+      const wsPerClass = XLSX.utils.aoa_to_sheet(perClassRows)
+      centerTitle(wsPerClass, 0, 0, 9, 'REKAPITULASI ANGKET UMPAN BALIK SISWA — PER KELAS')
+      wsPerClass['!cols'] = [
+        { wch: 5 }, { wch: 30 }, { wch: 22 }, { wch: 12 }, { wch: 13 },
+        { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 12 }, { wch: 16 },
+      ]
+      XLSX.utils.book_append_sheet(wb, wsPerClass, 'Rekapitulasi Per Kelas')
+
+      // ============================================================
+      // SHEET 3+: DETAIL PER GURU + KELAS (format sama dengan PDF)
+      // ============================================================
       let sheetNum = 1
 
       for (const { teacher, data } of teacherDetails) {
         const classes = data.classes || []
         const scoresByClass = data.scores_by_class || {}
-        const categoryCountsByClass = data.category_counts_by_class || {}
+        const countsByClass = data.category_counts_by_class || {}
         const feedbacksByClass = data.feedbacks_by_class || {}
-        const studentCountByClass = data.student_count_by_class || {}
+        const countByClass = data.student_count_by_class || {}
 
-        if (classes.length === 0) {
-          // Guru belum dinilai - 1 sheet kosong
-          let sheetName = `${sheetNum}. ${teacher.name} (Belum Dinilai)`
-          sheetName = sheetName.replace(/[\\\/\?\*\[\]:]/g, '')
-          if (sheetName.length > 31) sheetName = sheetName.substring(0, 31)
+        const classList = classes.length > 0 ? classes : [{ id: 0, name: 'Semua Kelas' }]
 
-          const rows: any[] = [
-            ['LAPORAN DETAIL UMPAN BALIK SISWA'],
-            [],
-            ['Nama Guru', teacher.name],
-            ['Mata Pelajaran', teacher.subject],
-            ['Status', 'Belum ada penilaian'],
-            ['Tanggal Export', today]
-          ]
-          const ws = XLSX.utils.aoa_to_sheet(rows)
-          ws['!cols'] = [{ wch: 25 }, { wch: 50 }]
-          XLSX.utils.book_append_sheet(wb, ws, sheetName)
-          sheetNum++
-        } else {
-          // 1 sheet per kelas
-          for (const cls of classes) {
-            let sheetName = `${sheetNum}. ${teacher.name} - ${cls.name}`
-            sheetName = sheetName.replace(/[\\\/\?\*\[\]:]/g, '')
-            if (sheetName.length > 31) sheetName = sheetName.substring(0, 31)
+        for (const cls of classList) {
+          const cid = String(cls.id)
+          const scores = scoresByClass[cid] || data.scores || { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0, total: 0 }
+          const catCounts = countsByClass[cid] || data.category_counts || {
+            kepribadian: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+            sosial: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+            pedagogik: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+            profesional: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+          }
+          const fbs = feedbacksByClass[cid] || data.feedbacks || []
+          const count = countByClass[cid] ?? data.student_count ?? 0
 
-            const scores = scoresByClass[String(cls.id)] || { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0, total: 0 }
-            const categoryCounts = categoryCountsByClass[String(cls.id)] || {
-              kepribadian: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-              sosial: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-              pedagogik: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-              profesional: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-            }
-            const feedbacks = feedbacksByClass[String(cls.id)] || []
-            const count = studentCountByClass[String(cls.id)] || 0
+          const rows: any[] = []
 
-            const rows: any[] = []
+          // --- Judul (row 0 & 1, akan di-merge center) ---
+          rows.push([]) // judul
+          rows.push([]) // tanggal
+          rows.push([])
 
-            // Header + Info
-            rows.push(['LAPORAN DETAIL UMPAN BALIK SISWA'])
-            rows.push([])
-            rows.push(['Nama Guru', teacher.name])
-            rows.push(['Mata Pelajaran', teacher.subject])
-            rows.push(['Kelas Penilai', cls.name])
-            rows.push(['Jumlah Responden', `${count} siswa`])
-            rows.push(['Skor Total', scores.total.toFixed(2)])
-            rows.push(['Tanggal Export', today])
-            rows.push([])
+          // --- Informasi Guru (sejajar: label, titik dua, nilai) ---
+          rows.push(['Informasi Guru', '', ''])
+          rows.push(['Nama', ':', teacher.name])
+          rows.push(['Mata Pelajaran', ':', teacher.subject])
+          rows.push(['Kelas', ':', cls.name])
+          rows.push(['Jumlah Responden', ':', `${count} siswa`])
+          rows.push(['Skor Total', ':', `${scores.total.toFixed(2)}% (${getScoreLabel(scores.total)})`])
+          rows.push([])
 
-            // Analisis Skor
-            rows.push(['ANALISIS SKOR PER KATEGORI'])
-            rows.push(['Kategori', 'Skor', 'Keterangan'])
-            rows.push(['Kepribadian', scores.kepribadian.toFixed(2), getScoreLabel(scores.kepribadian)])
-            rows.push(['Sosial', scores.sosial.toFixed(2), getScoreLabel(scores.sosial)])
-            rows.push(['Pedagogik', scores.pedagogik.toFixed(2), getScoreLabel(scores.pedagogik)])
-            rows.push(['Profesional', scores.profesional.toFixed(2), getScoreLabel(scores.profesional)])
-            rows.push([])
+          // --- Analisis Skor Per Kategori (tanpa kolom Jumlah) ---
+          rows.push(['ANALISIS SKOR PER KATEGORI', '', '', ''])
+          rows.push(['Kategori', 'Pertanyaan', 'Skor', 'Keterangan'])
+          rows.push(['Kepribadian', '1-3', `${scores.kepribadian.toFixed(2)}%`, getScoreLabel(scores.kepribadian)])
+          rows.push(['Sosial', '4-6', `${scores.sosial.toFixed(2)}%`, getScoreLabel(scores.sosial)])
+          rows.push(['Pedagogik', '7-9', `${scores.pedagogik.toFixed(2)}%`, getScoreLabel(scores.pedagogik)])
+          rows.push(['Profesional', '10-12', `${scores.profesional.toFixed(2)}%`, getScoreLabel(scores.profesional)])
+          rows.push([])
 
-            // Distribusi Jawaban
-            rows.push(['DISTRIBUSI JAWABAN'])
-            rows.push(['Kategori', 'Tingkat', 'Jumlah', 'Persentase'])
+          // --- Distribusi Jawaban 2 kolom (kiri: Kepribadian+Sosial, kanan: Pedagogik+Profesional) ---
+          rows.push(['DISTRIBUSI JAWABAN', '', '', '', '', '', '', ''])
+          rows.push(['Kategori', 'Tingkat Penilaian', 'Persentase', '', 'Kategori', 'Tingkat Penilaian', 'Persentase'])
 
-            Object.entries(CATEGORY_LABELS).forEach(([key, label]) => {
-              rows.push([label, '', '', ''])
-              const counts = categoryCounts[key] || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
-              const totalAnswers = Object.values(counts).reduce((a: number, b: any) => a + b, 0)
-
+          const buildSide = (keys: string[]) => {
+            const out: any[] = []
+            keys.forEach(key => {
+              const label = CATEGORY_LABELS[key]
+              const c = catCounts[key] || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+              const tot = Object.values(c).reduce((a: number, b: any) => a + b, 0)
+              out.push([label, '', ''])
               for (let s = 5; s >= 1; s--) {
-                const cnt = counts[s as keyof typeof counts] || 0
-                const pct = totalAnswers > 0 ? (cnt / totalAnswers) * 100 : 0
-                rows.push(['', SCORE_LABELS[s as 1|2|3|4|5], cnt, `${pct.toFixed(1)}%`])
+                const cnt = c[s as keyof typeof c] || 0
+                const pct = tot > 0 ? (cnt / tot) * 100 : 0
+                out.push(['', SCORE_LABELS[s as 1 | 2 | 3 | 4 | 5], `${pct.toFixed(1)}%`])
               }
             })
-            rows.push([])
-
-            // Saran & Masukan (ANONIM)
-            rows.push(['SARAN & MASUKAN SISWA (ANONIM)'])
-            rows.push(['No', 'Saran/Masukan'])
-
-            const validFeedbacks = feedbacks.filter((fb: any) => fb.feedback && fb.feedback.trim() !== '')
-            if (validFeedbacks.length === 0) {
-              rows.push(['', 'Tidak ada saran/masukan dari siswa'])
-            } else {
-              validFeedbacks.forEach((fb: any, idx: number) => {
-                rows.push([idx + 1, fb.feedback.trim()])
-              })
-            }
-
-            const ws = XLSX.utils.aoa_to_sheet(rows)
-            ws['!cols'] = [{ wch: 5 }, { wch: 100 }]
-            XLSX.utils.book_append_sheet(wb, ws, sheetName)
-            sheetNum++
+            return out
           }
+
+          const left = buildSide(['kepribadian', 'sosial'])
+          const right = buildSide(['pedagogik', 'profesional'])
+          const maxLen = Math.max(left.length, right.length)
+          for (let i = 0; i < maxLen; i++) {
+            const l = left[i] || ['', '', '']
+            const r = right[i] || ['', '', '']
+            rows.push([l[0], l[1], l[2], '', r[0], r[1], r[2]])
+          }
+          rows.push([])
+
+          // --- Saran & Masukan per kelas (ANONIM) ---
+          rows.push([`SARAN & MASUKAN SISWA (ANONIM) — KELAS ${cls.name}`, '', ''])
+          rows.push(['No', 'Saran/Masukan', ''])
+
+          const validFbs = fbs.filter((fb: any) => fb.feedback && fb.feedback.trim() !== '')
+          if (validFbs.length === 0) {
+            rows.push(['', 'Tidak ada saran/masukan dari siswa di kelas ini', ''])
+          } else {
+            validFbs.forEach((fb: any, idx: number) => {
+              rows.push([idx + 1, fb.feedback.trim(), ''])
+            })
+          }
+
+          const ws = XLSX.utils.aoa_to_sheet(rows)
+          centerTitle(ws, 0, 0, 7, 'LAPORAN ANGKET UMPAN BALIK SISWA')
+          centerTitle(ws, 1, 0, 7, `Tanggal: ${today}`)
+          ws['!cols'] = [
+            { wch: 22 }, { wch: 24 }, { wch: 14 }, { wch: 4 },
+            { wch: 22 }, { wch: 24 }, { wch: 14 }, { wch: 20 },
+          ]
+
+          let sheetName = `${sheetNum}. ${teacher.name} - ${cls.name}`
+          sheetName = sheetName.replace(/[\\\/\?\*\[\]:]/g, '')
+          if (sheetName.length > 31) sheetName = sheetName.substring(0, 31)
+          XLSX.utils.book_append_sheet(wb, ws, sheetName)
+          sheetNum++
         }
       }
 
-      const filename = `Rekap_Umpan_Balik_Siswa_PerKelas_${new Date().toISOString().split('T')[0]}`
+      const filename = `Rekap_Umpan_Balik_Siswa_${new Date().toISOString().split('T')[0]}`
       XLSX.writeFile(wb, `${filename}.xlsx`)
-
     } catch (err: any) {
       alert('Gagal export: ' + err.message)
     } finally {
@@ -457,8 +509,8 @@ export default function AdminDashboard() {
 
         {/* Footer Info */}
         <div className="mt-6 text-center text-xs text-gray-400">
-          <p>💡 Tip: Klik baris guru untuk melihat analisis detail per kategori</p>
-          <p className="mt-1">Export Excel akan membuat laporan terpisah untuk setiap kelas</p>
+          <p>💡 Export Excel berisi: Rekap Semua Guru, Rekap Per Kelas, dan Detail Laporan per Guru+Kelas</p>
+          <p className="mt-1">Terakhir diupdate: {new Date().toLocaleString()}</p>
         </div>
       </main>
     </div>
