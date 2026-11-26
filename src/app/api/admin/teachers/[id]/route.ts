@@ -1,58 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
-function getCategory(questionNo: number): 'kepribadian' | 'sosial' | 'pedagogik' | 'profesional' {
-  if (questionNo >= 1 && questionNo <= 3) return 'kepribadian'
-  if (questionNo >= 4 && questionNo <= 6) return 'sosial'
-  if (questionNo >= 7 && questionNo <= 9) return 'pedagogik'
+function getCategory(qNo: number): 'kepribadian' | 'sosial' | 'pedagogik' | 'profesional' {
+  if (qNo <= 3) return 'kepribadian'
+  if (qNo <= 6) return 'sosial'
+  if (qNo <= 9) return 'pedagogik'
   return 'profesional'
-}
-
-function computeStats(evals: any[], answers: any[]) {
-  const studentCount = evals.length
-  const evalIds = new Set(evals.map(e => e.id))
-
-  // Per kategori: simpan SUM dan COUNT jawaban aktual
-  const catSum: Record<string, number> = { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0 }
-  const catCount: Record<string, number> = { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0 }
-  const categoryCounts = {
-    kepribadian: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-    sosial: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-    pedagogik: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-    profesional: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-  }
-
-  answers.forEach(a => {
-    if (!evalIds.has(a.evaluation_id)) return
-    const cat = getCategory(a.question_no)
-    catSum[cat] += a.score
-    catCount[cat] += 1
-    categoryCounts[cat][a.score as keyof typeof categoryCounts.kepribadian]++
-  })
-
-  // ✅ RUMUS BARU: skor = (rata-rata jawaban / 5) × 100
-  const avg = (cat: string) => catCount[cat] > 0 ? catSum[cat] / catCount[cat] : 0
-  const toScore = (cat: string) => Math.round((avg(cat) / 5) * 100 * 100) / 100
-
-  const scores = {
-    kepribadian: toScore('kepribadian'),
-    sosial: toScore('sosial'),
-    pedagogik: toScore('pedagogik'),
-    profesional: toScore('profesional'),
-    total: 0,
-  }
-  scores.total = Math.round(((scores.kepribadian + scores.sosial + scores.pedagogik + scores.profesional) / 4) * 100) / 100
-
-  const feedbacks = evals
-    .filter(e => e.open_feedback)
-    .map(e => ({
-      student_name: e.students?.name || 'Anonim',
-      nis: e.students?.nis || '-',
-      feedback: e.open_feedback,
-      submitted_at: e.submitted_at
-    }))
-
-  return { studentCount, scores, categoryCounts, feedbacks }
 }
 
 export async function GET(
@@ -68,6 +21,7 @@ export async function GET(
     const { id } = await params
     const teacherId = parseInt(id)
 
+    // 1. Info guru
     const { data: teacher } = await supabase
       .from('teachers')
       .select('id, name, subject')
@@ -78,74 +32,103 @@ export async function GET(
       return NextResponse.json({ error: 'Guru tidak ditemukan' }, { status: 404 })
     }
 
-    const { data: evaluations } = await supabase
+    // ✅ 2. Skor per kelas (via RPC - cepat & tanpa limit!)
+    const { data: classScores } = await supabase
+      .rpc('admin_teacher_class_scores', { p_teacher_id: teacherId })
+
+    // ✅ 3. Distribusi jawaban per kelas (via RPC)
+    const { data: distData } = await supabase
+      .rpc('admin_teacher_class_distribution', { p_teacher_id: teacherId })
+
+    // 4. Feedback (per kelas)
+    const { data: feedbacks } = await supabase
       .from('evaluations')
-      .select('id, student_id, class_id, open_feedback, submitted_at, students(name, nis, class_id)')
+      .select('id, class_id, open_feedback, submitted_at, students(name, nis)')
       .eq('teacher_id', teacherId)
-      .order('submitted_at', { ascending: true })
+      .not('open_feedback', 'is', null)
+      .limit(1000)
 
-    const evalList = evaluations || []
-
-    let answers: any[] = []
-    if (evalList.length > 0) {
-      const evalIds = evalList.map(e => e.id)
-      const { data } = await supabase
-        .from('evaluation_answers')
-        .select('evaluation_id, question_no, score')
-        .in('evaluation_id', evalIds)
-      answers = data || []
-    }
-
-    const totalStats = computeStats(evalList, answers)
-
-    // Kelompokkan per kelas
-    const classGroups: Record<string, any[]> = {}
-    evalList.forEach(e => {
-      const classId = e.class_id || e.students?.class_id
-      const key = classId ? String(classId) : 'unknown'
-      if (!classGroups[key]) classGroups[key] = []
-      classGroups[key].push(e)
-    })
-
+    // 5. Bangun struktur per kelas
     const scoresByClass: Record<string, any> = {}
     const categoryCountsByClass: Record<string, any> = {}
     const feedbacksByClass: Record<string, any[]> = {}
     const studentCountByClass: Record<string, number> = {}
+    const classes: { id: number; name: string }[] = []
 
-    for (const [classKey, evals] of Object.entries(classGroups)) {
-      const stats = computeStats(evals, answers)
-      scoresByClass[classKey] = stats.scores
-      categoryCountsByClass[classKey] = stats.categoryCounts
-      feedbacksByClass[classKey] = stats.feedbacks
-      studentCountByClass[classKey] = stats.studentCount
+    for (const row of classScores || []) {
+      const cid = String(row.class_id)
+      classes.push({ id: row.class_id, name: row.class_name })
+      scoresByClass[cid] = {
+        kepribadian: Number(row.kepribadian),
+        sosial: Number(row.sosial),
+        pedagogik: Number(row.pedagogik),
+        profesional: Number(row.profesional),
+        total: Number(row.total),
+      }
+      studentCountByClass[cid] = Number(row.student_count)
+      categoryCountsByClass[cid] = {
+        kepribadian: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+        sosial: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+        pedagogik: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+        profesional: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+      }
     }
 
-    const classIds = Object.keys(classGroups).filter(k => k !== 'unknown').map(k => parseInt(k))
-    let classes: { id: number; name: string }[] = []
-    if (classIds.length > 0) {
-      const { data: classesData } = await supabase
-        .from('classes')
-        .select('id, name')
-        .in('id', classIds)
-        .order('name')
-      classes = classesData || []
+    // Isi distribusi dari RPC
+    for (const row of distData || []) {
+      const cid = String(row.class_id)
+      const cat = getCategory(row.question_no)
+      if (categoryCountsByClass[cid] && categoryCountsByClass[cid][cat]) {
+        categoryCountsByClass[cid][cat][row.score] = Number(row.jumlah)
+      }
     }
+
+    // Isi feedback per kelas
+    for (const fb of feedbacks || []) {
+      const cid = String(fb.class_id)
+      if (!feedbacksByClass[cid]) feedbacksByClass[cid] = []
+      feedbacksByClass[cid].push({
+        student_name: (fb as any).students?.name || 'Anonim',
+        nis: (fb as any).students?.nis || '-',
+        feedback: fb.open_feedback,
+        submitted_at: fb.submitted_at,
+      })
+    }
+
+    // 6. Hitung total gabungan (weighted average by student_count)
+    const totalStudents = Object.values(studentCountByClass).reduce((a, b) => a + b, 0)
+    const totalScores = { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0, total: 0 }
+    if (totalStudents > 0) {
+      for (const cid of Object.keys(scoresByClass)) {
+        const w = studentCountByClass[cid] / totalStudents
+        totalScores.kepribadian += scoresByClass[cid].kepribadian * w
+        totalScores.sosial += scoresByClass[cid].sosial * w
+        totalScores.pedagogik += scoresByClass[cid].pedagogik * w
+        totalScores.profesional += scoresByClass[cid].profesional * w
+      }
+      totalScores.total = (totalScores.kepribadian + totalScores.sosial + totalScores.pedagogik + totalScores.profesional) / 4
+      Object.keys(totalScores).forEach(k => { totalScores[k as keyof typeof totalScores] = Math.round(totalScores[k as keyof typeof totalScores] * 100) / 100 })
+    }
+
+    const allFeedbacks = Object.values(feedbacksByClass).flat()
 
     return NextResponse.json({
       success: true,
       teacher,
-      student_count: totalStats.studentCount,
-      scores: totalStats.scores,
-      category_counts: totalStats.categoryCounts,
-      feedbacks: totalStats.feedbacks,
+      // Backward compatible (untuk halaman detail lama)
+      student_count: totalStudents,
+      scores: totalScores,
+      category_counts: Object.values(categoryCountsByClass)[0] || {},
+      feedbacks: allFeedbacks,
+      // Baru: per kelas
       classes,
       scores_by_class: scoresByClass,
       category_counts_by_class: categoryCountsByClass,
       feedbacks_by_class: feedbacksByClass,
       student_count_by_class: studentCountByClass,
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching teacher detail:', error)
-    return NextResponse.json({ error: 'Terjadi kesalahan server' }, { status: 500 })
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

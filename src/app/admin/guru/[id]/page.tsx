@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -19,6 +18,11 @@ interface Feedback {
   nis: string
   feedback: string
   submitted_at: string
+}
+
+interface ClassInfo {
+  id: number
+  name: string
 }
 
 function getCookie(name: string): string | null {
@@ -66,6 +70,14 @@ export default function TeacherDetailPage() {
   const [categoryCounts, setCategoryCounts] = useState<Record<string, CategoryCount> | null>(null)
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([])
   const [studentCount, setStudentCount] = useState(0)
+
+  // Data per kelas
+  const [classes, setClasses] = useState<ClassInfo[]>([])
+  const [scoresByClass, setScoresByClass] = useState<Record<string, any>>({})
+  const [categoryCountsByClass, setCategoryCountsByClass] = useState<Record<string, Record<string, CategoryCount>>>({})
+  const [feedbacksByClass, setFeedbacksByClass] = useState<Record<string, Feedback[]>>({})
+  const [studentCountByClass, setStudentCountByClass] = useState<Record<string, number>>({})
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -91,6 +103,12 @@ export default function TeacherDetailPage() {
       setCategoryCounts(data.category_counts)
       setFeedbacks(data.feedbacks || [])
       setStudentCount(data.student_count)
+
+      setClasses(data.classes || [])
+      setScoresByClass(data.scores_by_class || {})
+      setCategoryCountsByClass(data.category_counts_by_class || {})
+      setFeedbacksByClass(data.feedbacks_by_class || {})
+      setStudentCountByClass(data.student_count_by_class || {})
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -112,191 +130,194 @@ export default function TeacherDetailPage() {
     return 'Perlu Perbaikan'
   }
 
-  // ===== EXPORT EXCEL =====
-  const handleExportExcel = () => {
-    if (!teacher || !scores) return
-
-    const wb = XLSX.utils.book_new()
-
-    // Sheet 1: Info Guru (Dengan Judul Laporan di Bagian Atas)
-    const infoData = [
-      { Field: 'LAPORAN DETAIL UMPAN BALIK SISWA', Value: '' },
-      { Field: '', Value: '' },
-      { Field: 'Nama Guru', Value: teacher.name },
-      { Field: 'Mata Pelajaran', Value: teacher.subject },
-      { Field: 'Jumlah Responden', Value: `${studentCount} siswa` },
-      { Field: 'Skor Total', Value: scores.total.toFixed(2) },
-      { Field: 'Tanggal Export', Value: new Date().toLocaleString('id-ID') },
-    ]
-    const wsInfo = XLSX.utils.json_to_sheet(infoData)
-    wsInfo['!cols'] = [{ wch: 35 }, { wch: 50 }]
-    XLSX.utils.book_append_sheet(wb, wsInfo, 'Info Guru')
-
-    // Sheet 2: Analisis Kategori
-    const categoryData = [
-      { Kategori: 'Kepribadian', Pertanyaan: '1-3', Skor: scores.kepribadian.toFixed(2), Keterangan: getScoreLabel(scores.kepribadian) },
-      { Kategori: 'Sosial', Pertanyaan: '4-6', Skor: scores.sosial.toFixed(2), Keterangan: getScoreLabel(scores.sosial) },
-      { Kategori: 'Pedagogik', Pertanyaan: '7-9', Skor: scores.pedagogik.toFixed(2), Keterangan: getScoreLabel(scores.pedagogik) },
-      { Kategori: 'Profesional', Pertanyaan: '10-12', Skor: scores.profesional.toFixed(2), Keterangan: getScoreLabel(scores.profesional) },
-    ]
-    const wsCategory = XLSX.utils.json_to_sheet(categoryData)
-    wsCategory['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 20 }]
-    XLSX.utils.book_append_sheet(wb, wsCategory, 'Analisis Kategori')
-
-    // Sheet 3: Distribusi Jawaban
-    const distData: any[] = []
-    if (categoryCounts) {
-      Object.entries(CATEGORY_LABELS).forEach(([key, label]) => {
-        const counts = categoryCounts[key]
-        const totalAnswers = Object.values(counts).reduce((a, b) => a + b, 0)
-        distData.push({ Kategori: label, 'Tingkat Penilaian': '', Jumlah: '', Persentase: '' })
-        for (let s = 5; s >= 1; s--) {
-          const count = counts[s as keyof CategoryCount] || 0
-          const pct = totalAnswers > 0 ? (count / totalAnswers) * 100 : 0
-          distData.push({
-            Kategori: '',
-            'Tingkat Penilaian': SCORE_LABELS[s as 1|2|3|4|5],
-            Jumlah: count,
-            Persentase: `${pct.toFixed(1)}%`
-          })
-        }
-      })
-    }
-    const wsDist = XLSX.utils.json_to_sheet(distData)
-    wsDist['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 12 }]
-    XLSX.utils.book_append_sheet(wb, wsDist, 'Distribusi Jawaban')
-
-    // Sheet 4: Saran Masukan (ANONIM)
-    const feedbackData: any[] = []
-    if (feedbacks.length === 0) {
-      feedbackData.push({ No: 1, 'Saran/Masukan': 'Tidak ada saran/masukan dari siswa' })
-    } else {
-      feedbacks.forEach((fb, idx) => {
-        if (fb.feedback && fb.feedback.trim() !== '') {
-          feedbackData.push({
-            No: idx + 1,
-            'Saran/Masukan': fb.feedback.trim()
-          })
-        }
-      })
-      if (feedbackData.length === 0) {
-        feedbackData.push({ No: 1, 'Saran/Masukan': 'Tidak ada saran/masukan dari siswa' })
+  // ===== Helper: bangun baris distribusi untuk daftar kategori tertentu =====
+  const buildDistRows = (
+    countsObj: Record<string, CategoryCount>,
+    keys: string[]
+  ): string[][] => {
+    const rows: string[][] = []
+    keys.forEach(key => {
+      const label = CATEGORY_LABELS[key]
+      const counts = countsObj[key] || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+      const totalAnswers = Object.values(counts).reduce((a, b) => a + b, 0)
+      rows.push([label, '', ''])
+      for (let s = 5; s >= 1; s--) {
+        const count = counts[s as keyof CategoryCount] || 0
+        const pct = totalAnswers > 0 ? (count / totalAnswers) * 100 : 0
+        rows.push(['', SCORE_LABELS[s as 1 | 2 | 3 | 4 | 5], `${pct.toFixed(1)}%`])
       }
-    }
-    const wsFeedback = XLSX.utils.json_to_sheet(feedbackData)
-    wsFeedback['!cols'] = [{ wch: 5 }, { wch: 100 }]
-    XLSX.utils.book_append_sheet(wb, wsFeedback, 'Saran Masukan')
-
-    // Download (Nama File Diubah)
-    const filename = `Laporan_Umpan_Balik_Siswa_${teacher.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`
-    XLSX.writeFile(wb, `${filename}.xlsx`)
+    })
+    return rows
   }
 
-  // ===== EXPORT PDF (ANONIM) =====
+  // ===== EXPORT PDF (1 FILE, SEMUA KELAS) =====
   const handleExportPDF = () => {
     if (!teacher || !scores) return
 
     const doc = new jsPDF()
 
-    // Header (Judul Diubah)
-    doc.setFontSize(16)
-    doc.setTextColor(79, 70, 229)
-    doc.text('LAPORAN ANGKET UMPAN BALIK SISWA', 14, 15)
-    doc.setFontSize(10)
-    doc.setTextColor(100, 100, 100)
-    doc.text(`Tanggal: ${new Date().toLocaleDateString('id-ID')}`, 14, 22)
+    // Daftar kelas (fallback: 1 entri gabungan)
+    const classList: ClassInfo[] =
+      classes.length > 0 ? classes : [{ id: 0, name: 'Semua Kelas' }]
 
-    // Informasi Guru (Di Bagian Atas)
-    doc.setFontSize(12)
-    doc.setTextColor(0, 0, 0)
-    doc.text('Informasi Guru', 14, 32)
-    doc.setFontSize(10)
-    doc.text(`Nama: ${teacher.name}`, 14, 38)
-    doc.text(`Mata Pelajaran: ${teacher.subject}`, 14, 44)
-    doc.text(`Jumlah Responden: ${studentCount} siswa`, 14, 50)
-    doc.text(`Skor Total: ${scores.total.toFixed(2)} (${getScoreLabel(scores.total)})`, 14, 56)
-
-    // Tabel Analisis Kategori
-    const categoryRows = Object.entries(CATEGORY_LABELS).map(([key, label]) => [
-      label,
-      key === 'kepribadian' ? '1-3' : key === 'sosial' ? '4-6' : key === 'pedagogik' ? '7-9' : '10-12',
-      scores[key].toFixed(2),
-      getScoreLabel(scores[key])
-    ])
-
-    autoTable(doc, {
-      startY: 62,
-      head: [['Kategori', 'Pertanyaan', 'Skor', 'Keterangan']],
-      body: categoryRows,
+    const distHead = [['Kategori', 'Tingkat', 'Persentase']]
+    const distStyles = {
       theme: 'grid',
-      headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
-      styles: { fontSize: 10, cellPadding: 3 },
+      headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' as const },
+      styles: { fontSize: 8.5, cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: 26, fontStyle: 'bold' as const },
+        1: { cellWidth: 40 },
+        2: { cellWidth: 20, halign: 'right' as const },
+      },
       alternateRowStyles: { fillColor: [245, 247, 250] },
-    })
-
-    // Tabel Distribusi Jawaban
-    const distRows: string[][] = []
-    if (categoryCounts) {
-      Object.entries(CATEGORY_LABELS).forEach(([key, label]) => {
-        const counts = categoryCounts[key]
-        const totalAnswers = Object.values(counts).reduce((a, b) => a + b, 0)
-        distRows.push([label, '', '', ''])
-        for (let s = 5; s >= 1; s--) {
-          const count = counts[s as keyof CategoryCount] || 0
-          const pct = totalAnswers > 0 ? (count / totalAnswers) * 100 : 0
-          distRows.push(['', SCORE_LABELS[s as 1|2|3|4|5], String(count), `${pct.toFixed(1)}%`])
-        }
-      })
+      tableWidth: 86,
     }
 
-    autoTable(doc, {
-      startY: (doc as any).lastAutoTable.finalY + 10,
-      head: [['Kategori', 'Tingkat Penilaian', 'Jumlah', 'Persentase']],
-      body: distRows,
-      theme: 'grid',
-      headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
-      styles: { fontSize: 9, cellPadding: 2 },
-      alternateRowStyles: { fillColor: [245, 247, 250] },
-    })
+    classList.forEach((cls, clsIndex) => {
+      // Halaman baru untuk setiap kelas setelah kelas pertama
+      if (clsIndex > 0) doc.addPage()
 
-    // Saran Masukan (ANONIM)
-    const lastY = (doc as any).lastAutoTable.finalY + 10
-    doc.setFontSize(12)
-    doc.setTextColor(0, 0, 0)
-    doc.text('Rekap Saran & Masukan dari Siswa (Anonim)', 14, lastY)
+      const cid = String(cls.id)
+      const classScores = scoresByClass[cid] || scores
+      const classCounts = categoryCountsByClass[cid] || categoryCounts || {}
+      const classFeedbacks = feedbacksByClass[cid] || feedbacks || []
+      const classStudentCount = studentCountByClass[cid] ?? studentCount
 
-    if (feedbacks.length === 0) {
-      doc.setFontSize(10)
-      doc.setTextColor(150, 150, 150)
-      doc.text('Tidak ada saran/masukan dari siswa', 14, lastY + 8)
-    } else {
-      let yPos = lastY + 8
+      // ===== HEADER: judul rata tengah =====
+      doc.setFontSize(16)
+      doc.setTextColor(79, 70, 229)
+      doc.setFont(undefined, 'bold')
+      doc.text('LAPORAN ANGKET UMPAN BALIK SISWA', 105, 18, { align: 'center' })
+
       doc.setFontSize(10)
       doc.setTextColor(100, 100, 100)
-      doc.text(`Total ${feedbacks.length} masukan dari siswa:`, 14, yPos)
-      yPos += 6
+      doc.setFont(undefined, 'normal')
+      doc.text(`Tanggal: ${new Date().toLocaleDateString('id-ID')}`, 105, 25, { align: 'center' })
 
-      feedbacks.forEach((fb, idx) => {
-        if (yPos > 270) {
-          doc.addPage()
-          yPos = 20
-        }
-        doc.setTextColor(0, 0, 0)
-        doc.setFontSize(9)
-        const prefix = `${idx + 1}. `
-        const splitFeedback = doc.splitTextToSize(prefix + fb.feedback, 180)
-        doc.text(splitFeedback, 14, yPos)
-        yPos += splitFeedback.length * 4.5 + 3
+      // ===== INFO GURU: sejajar rapi =====
+      doc.setFontSize(12)
+      doc.setTextColor(0, 0, 0)
+      doc.setFont(undefined, 'bold')
+      doc.text('Informasi Guru', 14, 38)
+
+      doc.setFontSize(10)
+      doc.setFont(undefined, 'normal')
+      const labelWidth = 45
+      const colonX = 14 + labelWidth - 5
+      const valueX = 14 + labelWidth
+      let y = 45
+
+      doc.text('Nama', 14, y); doc.text(':', colonX, y); doc.text(teacher.name, valueX, y); y += 6
+      doc.text('Mata Pelajaran', 14, y); doc.text(':', colonX, y); doc.text(teacher.subject, valueX, y); y += 6
+      doc.text('Kelas', 14, y); doc.text(':', colonX, y); doc.text(cls.name, valueX, y); y += 6
+      doc.text('Jumlah Responden', 14, y); doc.text(':', colonX, y); doc.text(`${classStudentCount} siswa`, valueX, y); y += 6
+      doc.text('Skor Total', 14, y); doc.text(':', colonX, y)
+      doc.text(`${classScores.total.toFixed(2)} (${getScoreLabel(classScores.total)})`, valueX, y)
+      y += 10
+
+      // ===== TABEL ANALISIS KATEGORI =====
+      const categoryRows = Object.entries(CATEGORY_LABELS).map(([key, label]) => [
+        label,
+        key === 'kepribadian' ? '1-3' : key === 'sosial' ? '4-6' : key === 'pedagogik' ? '7-9' : '10-12',
+        classScores[key].toFixed(2),
+        getScoreLabel(classScores[key]),
+      ])
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Kategori', 'Pertanyaan', 'Skor', 'Keterangan']],
+        body: categoryRows,
+        theme: 'grid',
+        headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
+        styles: { fontSize: 10, cellPadding: 3 },
+        alternateRowStyles: { fillColor: [245, 247, 250] },
       })
+
+      // ===== DISTRIBUSI JAWABAN: 2 KOLOM (kiri 2 kategori, kanan 2 kategori) =====
+      y = (doc as any).lastAutoTable.finalY + 10
+      doc.setFontSize(12)
+      doc.setTextColor(0, 0, 0)
+      doc.setFont(undefined, 'bold')
+      doc.text('Distribusi Jawaban', 14, y)
+
+      const distStartY = y + 4
+      const leftRows = buildDistRows(classCounts, ['kepribadian', 'sosial'])
+      const rightRows = buildDistRows(classCounts, ['pedagogik', 'profesional'])
+
+      // Tabel kiri
+      autoTable(doc, {
+        ...distStyles,
+        startY: distStartY,
+        head: distHead,
+        body: leftRows,
+        margin: { left: 14, right: 110, top: 10, bottom: 10 },
+      })
+
+      // Tabel kanan (startY sama agar sejajar)
+      autoTable(doc, {
+        ...distStyles,
+        startY: distStartY,
+        head: distHead,
+        body: rightRows,
+        margin: { left: 110, right: 14, top: 10, bottom: 10 },
+      })
+
+      // ===== HALAMAN BARU: SARAN & MASUKAN KELAS INI =====
+      doc.addPage()
+      doc.setFontSize(12)
+      doc.setTextColor(0, 0, 0)
+      doc.setFont(undefined, 'bold')
+      doc.text(`Saran & Masukan Siswa - ${cls.name} (Anonim)`, 105, 20, { align: 'center' })
+
+      doc.setFontSize(9)
+      doc.setTextColor(100, 100, 100)
+      doc.setFont(undefined, 'normal')
+      doc.text(`${teacher.name} • ${teacher.subject}`, 105, 27, { align: 'center' })
+
+      let yPos = 38
+      const validFeedbacks = classFeedbacks.filter(
+        (fb: any) => fb.feedback && fb.feedback.trim() !== ''
+      )
+
+      if (validFeedbacks.length === 0) {
+        doc.setTextColor(150, 150, 150)
+        doc.setFont(undefined, 'italic')
+        doc.text('Tidak ada saran/masukan dari siswa di kelas ini.', 14, yPos)
+      } else {
+        doc.setTextColor(100, 100, 100)
+        doc.text(`Total ${validFeedbacks.length} masukan dari siswa:`, 14, yPos)
+        yPos += 8
+
+        validFeedbacks.forEach((fb: any, idx: number) => {
+          if (yPos > 270) {
+            doc.addPage()
+            yPos = 20
+          }
+          doc.setTextColor(0, 0, 0)
+          doc.setFontSize(9)
+          doc.setFont(undefined, 'normal')
+          const splitFeedback = doc.splitTextToSize(`${idx + 1}. ${fb.feedback.trim()}`, 180)
+          doc.text(splitFeedback, 14, yPos)
+          yPos += splitFeedback.length * 4.5 + 4
+        })
+      }
+    })
+
+    // ===== FOOTER: anonim + nomor halaman (diisi sekali untuk semua halaman) =====
+    const totalPages = doc.getNumberOfPages()
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i)
+      doc.setFontSize(8)
+      doc.setTextColor(150, 150, 150)
+      doc.setFont(undefined, 'italic')
+      doc.text('* Data bersifat anonim - identitas siswa tidak ditampilkan', 14, 287)
+      doc.text(`Halaman ${i} dari ${totalPages}`, 196, 287, { align: 'right' })
     }
 
-    // Footer anonim
-    doc.setFontSize(8)
-    doc.setTextColor(150, 150, 150)
-    doc.text('* Data bersifat anonim - identitas siswa tidak ditampilkan', 14, 285)
-
-    // Download (Nama File Diubah)
-    const filename = `Laporan_Umpan_Balik_Siswa_${teacher.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`
+    // ===== DOWNLOAD: 1 file saja =====
+    const teacherName = teacher.name.replace(/\s+/g, '_')
+    const filename = `Laporan_Umpan_Balik_${teacherName}_${new Date().toISOString().split('T')[0]}`
     doc.save(`${filename}.pdf`)
   }
 
@@ -383,10 +404,37 @@ export default function TeacherDetailPage() {
           </div>
         </div>
 
+        {/* Daftar Kelas yang Dinilai */}
+        {classes.length > 0 && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">🏫 Kelas yang Menilai Guru Ini</h2>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              {classes.map((cls) => {
+                const cid = String(cls.id)
+                const s = scoresByClass[cid]
+                const c = studentCountByClass[cid] ?? 0
+                return (
+                  <div key={cls.id} className="border border-gray-200 rounded-lg p-4 text-center hover:border-indigo-300 transition">
+                    <p className="font-bold text-gray-900">{cls.name}</p>
+                    <p className={`text-2xl font-bold mt-1 ${
+                      s && s.total >= 80 ? 'text-green-600' :
+                      s && s.total >= 60 ? 'text-blue-600' :
+                      s && s.total >= 40 ? 'text-yellow-600' : 'text-red-600'
+                    }`}>
+                      {s ? s.total.toFixed(2) : '0.00'}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">{c} siswa</p>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Skor per Kategori */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">📊 Analisis Skor per Kategori</h2>
-          
+
           {studentCount === 0 ? (
             <div className="text-center py-8 text-gray-500">
               Belum ada data umpan balik untuk guru ini
@@ -440,14 +488,14 @@ export default function TeacherDetailPage() {
               {Object.entries(CATEGORY_LABELS).map(([key, label]) => {
                 const counts = categoryCounts[key]
                 const totalAnswers = Object.values(counts).reduce((a, b) => a + b, 0)
-                
+
                 return (
                   <div key={key} className="border border-gray-200 rounded-lg p-4">
                     <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                       <span>{CATEGORY_ICONS[key]}</span>
                       {label}
                     </h3>
-                    
+
                     <div className="grid grid-cols-5 gap-2">
                       {[5, 4, 3, 2, 1].map(score => {
                         const count = counts[score as keyof CategoryCount] || 0
@@ -483,10 +531,10 @@ export default function TeacherDetailPage() {
         {/* Jawaban Terbuka Siswa */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">💬 Saran & Masukan dari Siswa</h2>
-          
+
           {feedbacks.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
-              {studentCount === 0 
+              {studentCount === 0
                 ? 'Belum ada umpan balik untuk guru ini'
                 : 'Belum ada siswa yang memberikan saran/masukan'}
             </div>
@@ -508,13 +556,6 @@ export default function TeacherDetailPage() {
           <h2 className="text-lg font-bold text-gray-900 mb-4">📥 Export Laporan</h2>
           <div className="flex gap-3 flex-wrap">
             <button
-              onClick={handleExportExcel}
-              disabled={!teacher || !scores}
-              className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-            >
-              📊 Export Excel
-            </button>
-            <button
               onClick={handleExportPDF}
               disabled={!teacher || !scores}
               className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
@@ -523,7 +564,8 @@ export default function TeacherDetailPage() {
             </button>
           </div>
           <p className="text-xs text-gray-500 mt-3">
-            💡 File akan langsung terdownload di browser Anda. Data siswa bersifat anonim di laporan.
+            💡 PDF berisi laporan lengkap untuk <strong>semua kelas</strong> yang menilai guru ini dalam 1 file.
+            Untuk laporan Excel gabungan semua guru, gunakan tombol Export di Dashboard.
           </p>
         </div>
       </main>
