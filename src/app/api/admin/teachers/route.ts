@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
+// Helper: tentukan kategori dari nomor pertanyaan
 function getCategory(questionNo: number): 'kepribadian' | 'sosial' | 'pedagogik' | 'profesional' {
   if (questionNo >= 1 && questionNo <= 3) return 'kepribadian'
   if (questionNo >= 4 && questionNo <= 6) return 'sosial'
@@ -9,6 +10,7 @@ function getCategory(questionNo: number): 'kepribadian' | 'sosial' | 'pedagogik'
 }
 
 // ✅ RUMUS BARU: skor = (rata-rata jawaban / 5) × 100
+// Sama persis dengan yang dipakai di halaman detail guru
 function computeScores(answers: any[], evalIds: Set<string>) {
   const catSum: Record<string, number> = { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0 }
   const catCount: Record<string, number> = { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0 }
@@ -43,27 +45,23 @@ export async function GET(request: NextRequest) {
     }
 
     // 1. Ambil semua guru
-    const { data: teachers, error: teacherError } = await supabase
+    const { data: teachers, error: tError } = await supabase
       .from('teachers')
       .select('id, name, subject')
-      .order('name')
+      .order('name', { ascending: true })
 
-    if (teacherError || !teachers) {
-      return NextResponse.json({ error: 'Gagal memuat data guru' }, { status: 500 })
-    }
+    if (tError) throw tError
 
-    // 2. Ambil semua evaluasi + jawaban sekaligus (lebih efisien)
-    const { data: evaluations, error: evalError } = await supabase
+    // 2. Ambil SEMUA evaluasi sekaligus (lebih efisien daripada query per guru)
+    const { data: evaluations, error: eError } = await supabase
       .from('evaluations')
-      .select('id, teacher_id, class_id, student_id')
+      .select('id, teacher_id')
 
-    if (evalError) {
-      return NextResponse.json({ error: 'Gagal memuat data evaluasi' }, { status: 500 })
-    }
+    if (eError) throw eError
 
     const evalList = evaluations || []
 
-    // 3. Ambil semua jawaban
+    // 3. Ambil SEMUA jawaban sekaligus
     let allAnswers: any[] = []
     if (evalList.length > 0) {
       const evalIds = evalList.map(e => e.id)
@@ -81,13 +79,13 @@ export async function GET(request: NextRequest) {
       evalsByTeacher[e.teacher_id].push(e)
     })
 
-    // 5. Hitung skor per guru
+    // 5. Hitung skor per guru dengan RUMUS BARU
     const teacherResults = teachers.map(teacher => {
       const teacherEvals = evalsByTeacher[teacher.id] || []
       const evalIds = new Set(teacherEvals.map(e => e.id))
       const studentCount = teacherEvals.length
 
-      // ✅ Hitung skor dengan rumus baru
+      // ✅ Pakai fungsi computeScores yang sama dengan halaman detail
       const scores = computeScores(allAnswers, evalIds)
 
       return {
@@ -107,7 +105,7 @@ export async function GET(request: NextRequest) {
       teachers: teacherResults,
     })
   } catch (error: any) {
-    console.error('Error fetching teachers:', error)
+    console.error('Error fetching teacher scores:', error)
     return NextResponse.json(
       { error: 'Terjadi kesalahan server: ' + error.message },
       { status: 500 }
