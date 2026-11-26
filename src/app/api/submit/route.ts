@@ -3,11 +3,16 @@ import { supabase } from '@/lib/supabase'
 
 export async function POST(request: NextRequest) {
   try {
+    // ✅ student_id = UUID (string) → JANGAN parseInt!
     const studentId = request.cookies.get('student_id')?.value
+
+    // ✅ class_id = integer → parse ke number, null jika kosong
+    const classIdRaw = request.cookies.get('student_class_id')?.value
+    const classId = classIdRaw ? parseInt(classIdRaw, 10) : null
 
     if (!studentId) {
       return NextResponse.json(
-        { error: 'Tidak terautentikasi' },
+        { error: 'Tidak terautentikasi. Silakan login ulang.' },
         { status: 401 }
       )
     }
@@ -22,13 +27,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 1. Cek apakah sudah submit sebelumnya (PERBAIKAN DI SINI)
+    // 1. Cek apakah sudah submit sebelumnya (maybeSingle = aman jika belum ada)
     const { data: existing, error: checkError } = await supabase
       .from('evaluations')
       .select('id')
-      .eq('student_id', studentId)
+      .eq('student_id', studentId)   // string UUID, benar
       .eq('teacher_id', teacher_id)
-      .maybeSingle() // maybeSingle() lebih aman daripada single() jika data belum ada
+      .maybeSingle()
 
     if (checkError) {
       console.error('❌ Error checking existing evaluation:', checkError)
@@ -45,12 +50,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 2. Insert header evaluation
+    // 2. Insert header evaluation (DENGAN class_id)
     const { data: evaluation, error: evalError } = await supabase
       .from('evaluations')
       .insert({
-        student_id: studentId,
+        student_id: studentId,        // UUID string
         teacher_id: teacher_id,
+        class_id: classId,            // ✅ BARU: integer atau null
         open_feedback: open_feedback || null
       })
       .select()
@@ -58,9 +64,9 @@ export async function POST(request: NextRequest) {
 
     if (evalError || !evaluation) {
       console.error('❌ Error creating evaluation:', evalError)
-      
-      // Jika error karena unique constraint (meski sudah dicek di atas, ini pengaman ganda)
-      if (evalError.code === '23505') {
+
+      // Pengaman ganda: unique violation
+      if (evalError?.code === '23505') {
         return NextResponse.json(
           { error: 'Anda sudah mengisi angket untuk guru ini sebelumnya.' },
           { status: 400 }
@@ -73,7 +79,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 3. Insert detail answers (12 pertanyaan)
+    // 3. Insert detail jawaban (12 pertanyaan)
     const answerRows = answers.map((a: any) => ({
       evaluation_id: evaluation.id,
       question_no: a.question_no,
@@ -86,17 +92,15 @@ export async function POST(request: NextRequest) {
 
     if (answersError) {
       console.error('❌ Error creating answers:', answersError)
-      
-      // Rollback: hapus evaluation yang baru dibuat agar tidak ada data sampah
+      // Rollback agar tidak ada data sampah
       await supabase.from('evaluations').delete().eq('id', evaluation.id)
-      
       return NextResponse.json(
         { error: 'Gagal menyimpan jawaban detail' },
         { status: 500 }
       )
     }
 
-    console.log('✅ Angket berhasil disimpan untuk guru', teacher_id, 'oleh siswa', studentId)
+    console.log('✅ Angket tersimpan → guru:', teacher_id, '| siswa:', studentId, '| kelas:', classId)
 
     return NextResponse.json({
       success: true,

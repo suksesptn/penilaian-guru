@@ -14,40 +14,29 @@ function setCookie(name: string, value: string, days: number) {
   document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`
 }
 
-// ✅ PARSER FLEKSIBEL - menangani semua kemungkinan struktur API response
+// ✅ Parser khusus untuk struktur response API Anda: { success: true, data: {...} }
 function extractStudent(responseData: any): any {
   if (!responseData) return null
 
-  // Kemungkinan 1: { student: { id, ... } }
-  if (responseData.student && (responseData.student.id || responseData.student.student_id)) {
+  // Struktur API Anda: { success: true, data: { id, nis, name, class_id, class_name } }
+  if (responseData.data && responseData.data.id) {
     return {
-      id: responseData.student.id || responseData.student.student_id,
-      nis: responseData.student.nis,
-      name: responseData.student.name,
-      class_name: responseData.student.class_name || responseData.student.className,
-      class_id: responseData.student.class_id,
-    }
-  }
-
-  // Kemungkinan 2: { data: { id, ... } }
-  if (responseData.data && (responseData.data.id || responseData.data.student_id)) {
-    return {
-      id: responseData.data.id || responseData.data.student_id,
+      id: responseData.data.id,
       nis: responseData.data.nis,
       name: responseData.data.name,
-      class_name: responseData.data.class_name || responseData.data.className,
       class_id: responseData.data.class_id,
+      class_name: responseData.data.class_name,
     }
   }
 
-  // Kemungkinan 3: { id, ... } langsung
-  if (responseData.id || responseData.student_id) {
+  // Fallback: jika struktur berbeda
+  if (responseData.id) {
     return {
-      id: responseData.id || responseData.student_id,
+      id: responseData.id,
       nis: responseData.nis,
       name: responseData.name,
-      class_name: responseData.class_name || responseData.className,
       class_id: responseData.class_id,
+      class_name: responseData.class_name,
     }
   }
 
@@ -61,7 +50,6 @@ export default function LoginPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    // Jika sudah login sebagai siswa, langsung arahkan ke dashboard
     if (getCookie('student_id')) {
       router.push('/dashboard')
     }
@@ -81,35 +69,30 @@ export default function LoginPage() {
 
       const data = await res.json()
 
-      // Debug: tampilkan struktur data asli di console
       console.log('📦 API Response:', JSON.stringify(data, null, 2))
 
       if (!res.ok) {
         throw new Error(data.error || 'NIS tidak ditemukan. Hubungi admin sekolah.')
       }
 
-      // ✅ Gunakan parser fleksibel
+      // ✅ Gunakan parser untuk extract data siswa
       const student = extractStudent(data)
 
       if (!student || !student.id) {
         console.error('❌ Gagal extract student. Struktur data:', data)
-        throw new Error(
-          'Data siswa tidak valid. Buka Console (F12) untuk melihat struktur data API.'
-        )
+        throw new Error('Data siswa tidak valid. Silakan hubungi admin.')
       }
 
-      // ✅ Set cookie HANYA jika data valid
+      console.log('✅ Student extracted:', student)
+
+      // ✅ Set SEMUA cookie termasuk class_id
       setCookie('student_id', String(student.id), 1)
       setCookie('student_nis', String(student.nis || nis.trim()), 1)
       setCookie('student_name', String(student.name || 'Siswa'), 1)
-      setCookie('student_class_name', String(student.class_name || 'Kelas'), 1)
-      if (student.class_id) {
-        setCookie('student_class_id', String(student.class_id), 1)
-      }
+      setCookie('student_class_id', String(student.class_id || ''), 1)
+      setCookie('student_class_name', String(student.class_name || 'Kelas tidak diketahui'), 1)
 
-      console.log('✅ Login berhasil, redirect ke dashboard')
-      
-      // ✅ LANGSUNG REDIRECT (ini yang hilang sebelumnya!)
+      console.log('✅ Cookies set, redirecting to dashboard...')
       router.push('/dashboard')
     } catch (err: any) {
       console.error('💥 Login error:', err)

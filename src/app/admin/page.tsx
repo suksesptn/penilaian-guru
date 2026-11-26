@@ -103,7 +103,7 @@ export default function AdminDashboard() {
     return 'bg-gray-100 text-gray-700 border border-gray-300'
   }
 
-  // ===== EXPORT EXCEL (REKAP SEMUA GURU) =====
+  // ===== EXPORT EXCEL PER KELAS (UPDATE BARU) =====
   const handleExportAll = async () => {
     if (teachers.length === 0) {
       alert('Belum ada data untuk diexport')
@@ -115,113 +115,172 @@ export default function AdminDashboard() {
       const wb = XLSX.utils.book_new()
       const today = new Date().toLocaleDateString('id-ID')
 
-      // ===== Sheet 1: Rekapitulasi =====
+      // ===== Sheet 1: Rekapitulasi (1 baris per guru+kelas) =====
       const rankingRows: any[] = [
-        ['REKAPITULASI ANGKET UMPAN BALIK SISWA'], // ✅ JUDUL DIUBAH
+        ['REKAPITULASI ANGKET UMPAN BALIK SISWA'],
         [`Tanggal: ${today}`],
         [],
-        ['Rank', 'Nama Guru', 'Mata Pelajaran', 'Responden', 'Kepribadian', 'Sosial', 'Pedagogik', 'Profesional', 'Total']
+        ['Rank', 'Nama Guru', 'Mata Pelajaran', 'Kelas', 'Responden', 'Kepribadian', 'Sosial', 'Pedagogik', 'Profesional', 'Total']
       ]
 
-      teachers.forEach((t, idx) => {
-        rankingRows.push([
-          idx + 1,
-          t.name,
-          t.subject,
-          t.student_count,
-          t.scores.kepribadian.toFixed(2),
-          t.scores.sosial.toFixed(2),
-          t.scores.pedagogik.toFixed(2),
-          t.scores.profesional.toFixed(2),
-          t.scores.total.toFixed(2)
-        ])
-      })
+      let rank = 1
+      const teacherDetails: any[] = []
 
-      const wsRanking = XLSX.utils.aoa_to_sheet(rankingRows)
-      wsRanking['!cols'] = [
-        { wch: 6 }, { wch: 30 }, { wch: 20 }, { wch: 12 },
-        { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 10 }
-      ]
-      XLSX.utils.book_append_sheet(wb, wsRanking, 'Rekapitulasi')
-
-      // ===== Sheet Per Guru =====
-      for (let i = 0; i < teachers.length; i++) {
-        const teacher = teachers[i]
-
-        let sheetName = `${i + 1}. ${teacher.name}`
-        sheetName = sheetName.replace(/[\\\/\?\*\[\]:]/g, '')
-        if (sheetName.length > 31) sheetName = sheetName.substring(0, 31)
-
+      // Fetch detail semua guru sekaligus untuk data ranking + sheet detail
+      for (const teacher of teachers) {
         try {
           const res = await fetch(`/api/admin/teachers/${teacher.id}`)
           const data = await res.json()
           if (!res.ok) continue
 
-          const categoryCounts = data.category_counts || {}
-          const feedbacks = data.feedbacks || []
-          const studentCount = data.student_count || 0
+          teacherDetails.push({ teacher, data })
 
-          const rows: any[] = []
+          const classes = data.classes || []
+          const scoresByClass = data.scores_by_class || {}
+          const studentCountByClass = data.student_count_by_class || {}
 
-          // Header + Info Guru (di bagian atas)
-          rows.push(['LAPORAN DETAIL UMPAN BALIK SISWA']) // ✅ JUDUL DIUBAH
-          rows.push([])
-          rows.push(['Nama Guru', teacher.name])
-          rows.push(['Mata Pelajaran', teacher.subject])
-          rows.push(['Jumlah Responden', `${studentCount} siswa`])
-          rows.push(['Skor Total', teacher.scores.total.toFixed(2)])
-          rows.push(['Tanggal Export', today])
-          rows.push([])
-
-          // Analisis Skor Per Kategori
-          rows.push(['ANALISIS SKOR PER KATEGORI'])
-          rows.push(['Kategori', 'Skor', 'Keterangan'])
-          rows.push(['Kepribadian', teacher.scores.kepribadian.toFixed(2), getScoreLabel(teacher.scores.kepribadian)])
-          rows.push(['Sosial', teacher.scores.sosial.toFixed(2), getScoreLabel(teacher.scores.sosial)])
-          rows.push(['Pedagogik', teacher.scores.pedagogik.toFixed(2), getScoreLabel(teacher.scores.pedagogik)])
-          rows.push(['Profesional', teacher.scores.profesional.toFixed(2), getScoreLabel(teacher.scores.profesional)])
-          rows.push([])
-
-          // Distribusi Jawaban
-          rows.push(['DISTRIBUSI JAWABAN'])
-          rows.push(['Kategori', 'Tingkat', 'Jumlah', 'Persentase'])
-
-          Object.entries(CATEGORY_LABELS).forEach(([key, label]) => {
-            rows.push([label, '', '', ''])
-            const counts = categoryCounts[key] || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
-            const totalAnswers = Object.values(counts).reduce((a: number, b: any) => a + b, 0)
-
-            for (let s = 5; s >= 1; s--) {
-              const count = counts[s as keyof typeof counts] || 0
-              const pct = totalAnswers > 0 ? (count / totalAnswers) * 100 : 0
-              rows.push(['', SCORE_LABELS[s as 1|2|3|4|5], count, `${pct.toFixed(1)}%`])
-            }
-          })
-          rows.push([])
-
-          // ✅ Saran & Masukan (ANONIM - HANYA 2 KOLOM)
-          rows.push(['SARAN & MASUKAN SISWA (ANONIM)'])
-          rows.push(['No', 'Saran/Masukan'])
-
-          const validFeedbacks = feedbacks.filter((fb: any) => fb.feedback && fb.feedback.trim() !== '')
-          if (validFeedbacks.length === 0) {
-            rows.push(['', 'Tidak ada saran/masukan dari siswa'])
+          if (classes.length === 0) {
+            // Guru belum dinilai
+            rankingRows.push([
+              rank++, teacher.name, teacher.subject, '-', 0, 0, 0, 0, 0, 0
+            ])
           } else {
-            validFeedbacks.forEach((fb: any, idx: number) => {
-              rows.push([idx + 1, fb.feedback.trim()])
-            })
+            // 1 baris per kelas
+            for (const cls of classes) {
+              const scores = scoresByClass[String(cls.id)] || { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0, total: 0 }
+              const count = studentCountByClass[String(cls.id)] || 0
+              rankingRows.push([
+                rank++,
+                teacher.name,
+                teacher.subject,
+                cls.name,
+                count,
+                scores.kepribadian.toFixed(2),
+                scores.sosial.toFixed(2),
+                scores.pedagogik.toFixed(2),
+                scores.profesional.toFixed(2),
+                scores.total.toFixed(2)
+              ])
+            }
           }
-
-          const ws = XLSX.utils.aoa_to_sheet(rows)
-          ws['!cols'] = [{ wch: 5 }, { wch: 100 }] // Lebar kolom disesuaikan agar saran terbaca penuh
-          XLSX.utils.book_append_sheet(wb, ws, sheetName)
-
         } catch (err) {
-          console.error(`Error exporting teacher ${teacher.name}:`, err)
+          console.error(`Error export teacher ${teacher.name}:`, err)
         }
       }
 
-      const filename = `Rekap_Umpan_Balik_Siswa_${new Date().toISOString().split('T')[0]}`
+      const wsRanking = XLSX.utils.aoa_to_sheet(rankingRows)
+      wsRanking['!cols'] = [
+        { wch: 6 }, { wch: 30 }, { wch: 20 }, { wch: 12 }, { wch: 12 },
+        { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 10 }
+      ]
+      XLSX.utils.book_append_sheet(wb, wsRanking, 'Rekapitulasi')
+
+      // ===== Sheet Per Guru+Kelas =====
+      let sheetNum = 1
+
+      for (const { teacher, data } of teacherDetails) {
+        const classes = data.classes || []
+        const scoresByClass = data.scores_by_class || {}
+        const categoryCountsByClass = data.category_counts_by_class || {}
+        const feedbacksByClass = data.feedbacks_by_class || {}
+        const studentCountByClass = data.student_count_by_class || {}
+
+        if (classes.length === 0) {
+          // Guru belum dinilai - 1 sheet kosong
+          let sheetName = `${sheetNum}. ${teacher.name} (Belum Dinilai)`
+          sheetName = sheetName.replace(/[\\\/\?\*\[\]:]/g, '')
+          if (sheetName.length > 31) sheetName = sheetName.substring(0, 31)
+
+          const rows: any[] = [
+            ['LAPORAN DETAIL UMPAN BALIK SISWA'],
+            [],
+            ['Nama Guru', teacher.name],
+            ['Mata Pelajaran', teacher.subject],
+            ['Status', 'Belum ada penilaian'],
+            ['Tanggal Export', today]
+          ]
+          const ws = XLSX.utils.aoa_to_sheet(rows)
+          ws['!cols'] = [{ wch: 25 }, { wch: 50 }]
+          XLSX.utils.book_append_sheet(wb, ws, sheetName)
+          sheetNum++
+        } else {
+          // 1 sheet per kelas
+          for (const cls of classes) {
+            let sheetName = `${sheetNum}. ${teacher.name} - ${cls.name}`
+            sheetName = sheetName.replace(/[\\\/\?\*\[\]:]/g, '')
+            if (sheetName.length > 31) sheetName = sheetName.substring(0, 31)
+
+            const scores = scoresByClass[String(cls.id)] || { kepribadian: 0, sosial: 0, pedagogik: 0, profesional: 0, total: 0 }
+            const categoryCounts = categoryCountsByClass[String(cls.id)] || {
+              kepribadian: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+              sosial: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+              pedagogik: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+              profesional: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+            }
+            const feedbacks = feedbacksByClass[String(cls.id)] || []
+            const count = studentCountByClass[String(cls.id)] || 0
+
+            const rows: any[] = []
+
+            // Header + Info
+            rows.push(['LAPORAN DETAIL UMPAN BALIK SISWA'])
+            rows.push([])
+            rows.push(['Nama Guru', teacher.name])
+            rows.push(['Mata Pelajaran', teacher.subject])
+            rows.push(['Kelas Penilai', cls.name])
+            rows.push(['Jumlah Responden', `${count} siswa`])
+            rows.push(['Skor Total', scores.total.toFixed(2)])
+            rows.push(['Tanggal Export', today])
+            rows.push([])
+
+            // Analisis Skor
+            rows.push(['ANALISIS SKOR PER KATEGORI'])
+            rows.push(['Kategori', 'Skor', 'Keterangan'])
+            rows.push(['Kepribadian', scores.kepribadian.toFixed(2), getScoreLabel(scores.kepribadian)])
+            rows.push(['Sosial', scores.sosial.toFixed(2), getScoreLabel(scores.sosial)])
+            rows.push(['Pedagogik', scores.pedagogik.toFixed(2), getScoreLabel(scores.pedagogik)])
+            rows.push(['Profesional', scores.profesional.toFixed(2), getScoreLabel(scores.profesional)])
+            rows.push([])
+
+            // Distribusi Jawaban
+            rows.push(['DISTRIBUSI JAWABAN'])
+            rows.push(['Kategori', 'Tingkat', 'Jumlah', 'Persentase'])
+
+            Object.entries(CATEGORY_LABELS).forEach(([key, label]) => {
+              rows.push([label, '', '', ''])
+              const counts = categoryCounts[key] || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+              const totalAnswers = Object.values(counts).reduce((a: number, b: any) => a + b, 0)
+
+              for (let s = 5; s >= 1; s--) {
+                const cnt = counts[s as keyof typeof counts] || 0
+                const pct = totalAnswers > 0 ? (cnt / totalAnswers) * 100 : 0
+                rows.push(['', SCORE_LABELS[s as 1|2|3|4|5], cnt, `${pct.toFixed(1)}%`])
+              }
+            })
+            rows.push([])
+
+            // Saran & Masukan (ANONIM)
+            rows.push(['SARAN & MASUKAN SISWA (ANONIM)'])
+            rows.push(['No', 'Saran/Masukan'])
+
+            const validFeedbacks = feedbacks.filter((fb: any) => fb.feedback && fb.feedback.trim() !== '')
+            if (validFeedbacks.length === 0) {
+              rows.push(['', 'Tidak ada saran/masukan dari siswa'])
+            } else {
+              validFeedbacks.forEach((fb: any, idx: number) => {
+                rows.push([idx + 1, fb.feedback.trim()])
+              })
+            }
+
+            const ws = XLSX.utils.aoa_to_sheet(rows)
+            ws['!cols'] = [{ wch: 5 }, { wch: 100 }]
+            XLSX.utils.book_append_sheet(wb, ws, sheetName)
+            sheetNum++
+          }
+        }
+      }
+
+      const filename = `Rekap_Umpan_Balik_Siswa_PerKelas_${new Date().toISOString().split('T')[0]}`
       XLSX.writeFile(wb, `${filename}.xlsx`)
 
     } catch (err: any) {
@@ -399,7 +458,7 @@ export default function AdminDashboard() {
         {/* Footer Info */}
         <div className="mt-6 text-center text-xs text-gray-400">
           <p>💡 Tip: Klik baris guru untuk melihat analisis detail per kategori</p>
-          <p className="mt-1">Terakhir diupdate: {new Date().toLocaleString()}</p>
+          <p className="mt-1">Export Excel akan membuat laporan terpisah untuk setiap kelas</p>
         </div>
       </main>
     </div>
